@@ -128,6 +128,28 @@ table.dash{width:100%;border-collapse:collapse;font-size:14px;background:var(--s
 table.dash th,table.dash td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left}
 table.dash th{font-size:12px;color:var(--muted)}
 .teacher-ans{margin-top:8px}
+
+.road{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+.step.cur{border-color:var(--warn);box-shadow:inset 0 0 0 1px var(--warn)} .step.done .num{background:var(--jade);color:var(--jade-ink)}
+.step .sh{display:flex;gap:8px;align-items:center;margin-bottom:2px}.step .num{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:99px;background:var(--line);font-size:12px;font-weight:700}
+.hwrow{display:flex;gap:6px;align-items:center;justify-content:space-between;margin:4px 0;font-size:14px}.hwrow .btn,.hwrow .chip{white-space:nowrap}.hwrow>span:first-child{flex:1}
+.now{border-color:var(--warn);background:var(--warn-soft);margin:10px 0}
+.nbbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.nbbar select{width:auto;min-width:220px}
+.seg3{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}.seg3 button{border:none;background:var(--surface);padding:7px 12px;font-size:13px;font-weight:600}.seg3 button[aria-pressed=true]{background:var(--jade);color:var(--jade-ink)}
+.nbh{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.srow{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:7px 12px;margin:5px 0}
+.srow b{font-family:var(--f-num);color:var(--muted);min-width:1.2em}.srow .zh{flex:1}
+.srow.ok{border-color:var(--ok);background:var(--ok-soft)}.srow.bad{border-color:var(--seal);background:var(--seal-soft)}
+.dist{display:inline-block;width:140px;height:10px;border-radius:99px;background:var(--line);overflow:hidden}.dist i{display:block;height:100%;background:var(--jade)}
+.srow.bad .dist i,.srow:not(.ok) .dist i{background:var(--seal)} .srow.ok .dist i{background:var(--ok)}
+label.chk{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:14px;background:var(--surface)}
+.lec{max-width:1100px;margin:0 auto;padding:14px 18px 30px}
+.lecbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.lecbody{min-height:55vh}
+.lecctl{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;position:sticky;bottom:0;background:var(--paper);padding:10px 0}
+input[type=date]{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit}
+@media print{.noprint,button,audio,.lecctl{display:none!important}.q{break-inside:avoid}body{background:#fff}}
 @media (max-width:560px){.opts{grid-template-columns:1fr 1fr}.wrap{padding:12px 12px 120px}}
 @media print{header.top,.foot{display:none}}
 </style>
@@ -273,7 +295,7 @@ async function syncWrong(){
 function render(){
   clearInterval(tick);
   if(!S.user) S.view = 'login';
-  ({login:viewLogin, home:viewHome, test:viewTest, teacher:viewTeacher}[S.view] || viewHome)();
+  ({login:viewLogin, home:viewHome, test:viewTest, teacher:viewTeacher, notebook:viewNotebook, lecture:viewLecture}[S.view] || viewHome)();
   window.scrollTo(0,0);
 }
 function topbar(right=''){
@@ -324,15 +346,19 @@ function viewHome(){
   const exam = S.corner === 'exam';
   const sets = SETS.filter(s => s.level === S.level && (exam ? s.corner === 'exam' : s.corner !== 'exam'));
   const hist = LS.get(histKey(S.user.sid), []);
-  app.innerHTML = topbar(`${TEACHER?'<button class="btn sm" data-act="teacher">교사용 현황</button>':''}<button class="btn sm ghost" data-act="logout">${esc(S.user.name)} · 로그아웃</button>`) + `
+  app.innerHTML = topbar(`${TEACHER?'<button class="btn sm" data-act="teacher">교수자 메뉴</button>':''}<button class="btn sm" data-act="notebook">📒 오답노트</button><button class="btn sm ghost" data-act="logout">${esc(S.user.name)} · 로그아웃</button>`) + `
   <div class="wrap">
     <h1>${esc(S.user.name)}님, 加油！</h1>
+    ${nowBanner()}
+    <div class="levels" role="group" aria-label="급수 선택">${[4,5,6].map(l=>`<button data-act="level" data-v="${l}" aria-pressed="${S.level===l}">HSK ${l}급</button>`).join('')}</div>
+    <h2 style="margin:14px 0 8px">HSK ${S.level}급 학습 순서</h2>
+    ${roadmapHTML(S.level)}
+    <h2 style="margin:26px 0 0">전체 문제 보기</h2>
     <div class="corners" role="tablist">
       <button role="tab" data-act="corner" data-v="class" aria-selected="${!exam}"><b>📘 수업용 요약본</b><span>선생님과 함께 · 세트당 약 40문항 · 해설 포함</span></button>
       <button role="tab" data-act="corner" data-v="exam" aria-selected="${exam}"><b>📝 실전 모의고사</b><span>혼자 시험처럼 · 100문항 · 중간 저장 후 이어 풀기</span></button>
     </div>
     <p class="muted">${exam ? '실제 시험처럼 시간을 재며 풉니다. 중간에 나가도 자동 저장되어, 다음에 이름·비밀번호로 들어와 <b>이어서 풀기</b>를 누르면 됩니다. 제출하면 바로 채점되고 틀린 문제는 다시 풀 수 있어요.' : '수업 시간에 선생님과 함께 푸는 요약본입니다. 전체 또는 영역별로 풀고, 제출하면 바로 채점·해설을 볼 수 있어요.'}</p>
-    <div class="levels" role="group" aria-label="급수 선택">${[4,5,6].map(l=>`<button data-act="level" data-v="${l}" aria-pressed="${S.level===l}">HSK ${l}급</button>`).join('')}</div>
     <div class="sets">${sets.map(set => exam ? examCard(set, hist) : classCard(set, hist)).join('')}</div>
     <p class="muted" style="margin-top:24px;font-size:13px">🎧 이어폰을 준비하세요. 🎙 말하기는 Chrome·Edge·Safari에서 음성 인식이 가장 잘 됩니다. ${CFG.SCRIPT_URL?'':'<br>⚠️ 아직 구글시트가 연결되지 않아 기록은 이 기기에만 저장됩니다.'}</p>
   </div>`;
@@ -768,6 +794,7 @@ async function submit(){
   const wk = wrongKey(S.user.sid, S.set.id); const wrong = new Set(LS.get(wk, []));
   for(const r of rows) if(r.ok === true) wrong.delete(r.id); else if(r.ok === false) wrong.add(r.id);
   LS.set(wk, [...wrong]); S.retryCount = wrong.size;
+  recordNotebook(S.set.id, rows);
   const hist = LS.get(histKey(S.user.sid), []); hist.push({set:S.set.id, mode:S.mode==='exam'?'exam':S.scope==='retry'?'retry':'test', scope:S.scope, c, t:obj.length, at:Date.now()}); LS.set(histKey(S.user.sid), hist.slice(-100));
   if(S.mode === 'exam'){ LS.set(progKey(S.user.sid, S.set.id), null); if(CFG.SCRIPT_URL && S.user.h) api({action:'clearProgress', name:S.user.name, hash:S.user.h, setId:S.set.id}).catch(()=>{}); }
   render();
@@ -790,8 +817,15 @@ function resultHTML(){
 
 // ── teacher dashboard ──
 function viewTeacher(){
+  S.ttab = S.ttab || 'review';
+  if(S.ttab !== 'stat'){
+    app.innerHTML = topbar(`<button class="btn sm" data-act="home">학생 화면</button>`) + `<div class="wrap"><h1>교수자 메뉴</h1>${viewTeacherTabs(S.ttab)}
+      ${CFG.SCRIPT_URL?'':'<p class="chip warn">config.js에 SCRIPT_URL을 넣어야 학생 기록을 모을 수 있어요.</p>'}
+      ${S.ttab==='review'?viewReview():viewPlan()}</div>`;
+    return;
+  }
   app.innerHTML = topbar(`<button class="btn sm" data-act="home">학생 화면</button>`) + `<div class="wrap">
-    <h1>교사용 현황</h1><p class="muted">구글시트에 쌓인 기록을 불러옵니다. Apps Script 속성에 TEACHER_PIN을 설정해 두세요.</p>
+    <h1>교수자 메뉴</h1>${viewTeacherTabs('stat')}<p class="muted">구글시트에 쌓인 기록을 불러옵니다. Apps Script 속성에 TEACHER_PIN을 설정해 두세요.</p>
     ${CFG.SCRIPT_URL?'':'<p class="chip warn">config.js에 SCRIPT_URL을 먼저 넣어야 합니다.</p>'}
     <div class="card" style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
       <div><label class="muted" style="font-size:13px">세트</label><select id="tset">${SETS.map(s=>`<option value="${s.id}">${s.corner==='exam'?'[실전] ':'[요약] '}${esc(s.title)}</option>`).join('')}</select></div>
@@ -815,6 +849,260 @@ async function loadTeacher(){
       <table class="dash"><tr><th>문항</th><th>유형</th><th>응답</th><th>오답률</th><th>정답</th></tr>
       ${stats.map(({e,st})=>`<tr><td class="mono">${SEC_KO[e.sec.key]} ${itemNo(e.item.id)}</td><td>${esc(e.part.title)}</td><td class="mono">${st.n}</td><td><div class="bar" style="width:120px;display:inline-block;vertical-align:middle;background:var(--ok-soft)"><i style="width:${Math.round(st.wrong/st.n*100)}%;background:var(--seal)"></i></div> <span class="mono">${Math.round(st.wrong/st.n*100)}%</span></td><td class="zh" style="font-size:14px">${esc(correctText(e))}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">기록 없음</td></tr>'}</table>`;
   }catch(err){ out.innerHTML = '<p class="chip seal">네트워크 오류</p>'; }
+}
+
+// ══════════════ 수업 흐름 · 오답노트 · 재강의 ══════════════
+const STEPS = [
+  {key:'ex', icon:'👩‍🏫', name:'예제 40문제', sub:'줌 수업에서 선생님과 함께'},
+  {key:'hw', icon:'📝', name:'과제: 실전 모의고사', sub:'1회·2회 혼자 시험처럼 풀기'},
+  {key:'re', icon:'🎓', name:'재강의', sub:'많이 틀린 문제를 줌에서 다시 설명'},
+  {key:'retry', icon:'🔁', name:'내 오답 다시 풀기', sub:'내가 틀린 문제만 다시'}
+];
+const nbKey = sid => `hsk_nb_${sid}`;
+const _flat = {};
+function flatOf(setId){ return _flat[setId] || (_flat[setId] = flatten(getSet(setId))); }
+function entryOf(setId, id){ return flatOf(setId).find(e => e.item.id === id); }
+function audioSrcTag(setId, id){ return `<audio controls preload="none" src="audio/${setId}/${id}.mp3"></audio>`; }
+function fmtDue(d){ if(!d) return ''; const t = new Date(d+'T23:59:00+09:00'); const days = Math.ceil((t - Date.now())/86400000); return `${d.slice(5).replace('-','/')} 마감${days>=0?` (D-${days})`:' (지남)'}`; }
+async function loadConfig(){
+  if(!CFG.SCRIPT_URL){ S.cfg = LS.get('hsk_cfg', {}); return; }
+  try{ const r = await apiGet({action:'config'}); if(r && r.ok){ S.cfg = r.config || {}; LS.set('hsk_cfg', S.cfg); if(S.view==='home') render(); } }
+  catch(e){ S.cfg = LS.get('hsk_cfg', {}); }
+}
+function recordNotebook(setId, rows){
+  const nb = LS.get(nbKey(S.user.sid), {});
+  for(const r of rows){ if(r.ok == null) continue;
+    const k = setId+'|'+r.id, it = nb[k] = nb[k] || {set:setId, id:r.id, tries:0, misses:0, firstResp:'', lastResp:'', lastOk:false, lastAt:''};
+    it.tries++; if(!r.ok){ it.misses++; if(!it.firstResp) it.firstResp = String(r.resp); }
+    it.lastResp = String(r.resp); it.lastOk = !!r.ok; it.lastAt = new Date().toISOString(); }
+  LS.set(nbKey(S.user.sid), nb);
+}
+function reviewedSet(){ const r = (S.cfg||{}).reviewed || {}; const s = new Set(); for(const k in r) for(const id of r[k]) s.add(k+'|'+id); return s; }
+
+// ── home: 학습 순서 ──
+function roadmapHTML(level){
+  const cfg = S.cfg || {}, hist = LS.get(histKey(S.user.sid), []);
+  const exSets = SETS.filter(s => s.level===level && s.corner!=='exam'), hwSets = SETS.filter(s => s.level===level && s.corner==='exam');
+  const cur = cfg.level===level ? cfg.step : null;
+  const exDone = exSets.some(s => hist.some(h => h.set===s.id));
+  const hwState = hwSets.map(s => { const d = hist.filter(h => h.set===s.id && h.mode==='exam'); const prog = LS.get(progKey(S.user.sid, s.id), null);
+    return {s, done:d.length>0, last:d.slice(-1)[0], prog}; });
+  const reviewed = ((cfg.reviewed||{})); const reCount = hwSets.concat(exSets).reduce((a,s)=>a+((reviewed[s.id]||[]).length),0);
+  const wrongN = hwSets.concat(exSets).reduce((a,s)=>a+LS.get(wrongKey(S.user.sid,s.id),[]).length,0);
+  const st = {ex: exDone, hw: hwState.every(x=>x.done), re: reCount>0, retry: hwState.some(x=>x.done) && wrongN===0};
+  const body = {
+    ex: `<div class="row">${exSets.map(s=>`<button class="btn sm" data-act="start" data-set="${s.id}" data-scope="all">${esc(s.label)}세트 열기</button>`).join('')}</div>`,
+    hw: hwState.map(x=>`<div class="hwrow"><span>${esc(x.s.label)} <span class="muted">(${esc(x.s.source)})</span></span>${x.done?`<span class="chip">완료 ${Math.round(x.last.c/Math.max(1,x.last.t)*100)}%</span>`:x.prog?`<span class="chip warn">진행 중 ${x.prog.pct||0}%</span>`:'<span class="chip seal">미응시</span>'}
+      <button class="btn sm ${x.done?'':'pri'}" data-act="exam" data-set="${x.s.id}" data-v="${x.prog?'resume':'new'}">${x.prog?'이어서':x.done?'다시':'시작'}</button></div>`).join('') + (cfg.due&&cfg.due[level]?`<div class="muted" style="font-size:12.5px;margin-top:4px">⏰ ${fmtDue(cfg.due[level])}</div>`:''),
+    re: reCount ? `<div class="muted" style="font-size:13px">선생님이 설명한 문제 ${reCount}개 — 오답노트에 🎓 표시</div>` : `<div class="muted" style="font-size:13px">과제가 끝나면 줌에서 진행해요</div>`,
+    retry: `<div class="muted" style="font-size:13px">남은 오답 <b>${wrongN}</b>개</div><div class="row">${hwSets.concat(exSets).map(s=>{const n=LS.get(wrongKey(S.user.sid,s.id),[]).length; return n?`<button class="btn sm seal" data-act="start" data-set="${s.id}" data-scope="retry">${s.corner==='exam'?'실전 ':'예제 '}${esc(s.label)} (${n})</button>`:'';}).join('')}<button class="btn sm" data-act="notebook" data-v="${level}">📒 오답노트</button></div>`
+  };
+  return `<div class="road">${STEPS.map((x,i)=>`<div class="step ${cur===x.key?'cur':''} ${st[x.key]?'done':''}">
+    <div class="sh"><span class="num">${st[x.key]?'✓':i+1}</span><b>${x.icon} ${x.name}</b>${cur===x.key?'<span class="chip warn">지금</span>':''}</div>
+    <div class="muted" style="font-size:12.5px;margin-bottom:6px">${x.sub}</div>${body[x.key]}</div>`).join('')}</div>`;
+}
+function nowBanner(){
+  const c = S.cfg || {}; if(!c.level || !c.step) return '';
+  const step = STEPS.find(s => s.key===c.step); if(!step) return '';
+  return `<div class="now card"><b>📍 지금 할 일</b> · HSK ${c.level}급 · ${step.icon} ${step.name}${c.due&&c.due[c.level]&&c.step==='hw'?` · ⏰ ${fmtDue(c.due[c.level])}`:''}${c.note?`<div style="margin-top:4px">${esc(c.note)}</div>`:''}</div>`;
+}
+
+// ── 공통: 문제를 읽기 전용으로 그리기 (오답노트·재강의) ──
+function staticQ(e, resp, o={}){
+  const it = e.item, t = e.part.type, g = e.group, setId = o.setId, reveal = o.reveal !== false, dist = o.dist, n = o.n || 0;
+  const bar = k => dist ? (()=>{ const c = dist[k]||0, p = n?Math.round(c/n*100):0; return `<span class="dist"><i style="width:${p}%"></i></span><span class="mono muted" style="font-size:12px;min-width:5em;text-align:right">${c}명 ${p}%</span>`; })() : '';
+  let h = '';
+  if(o.audio && (t==='tf'||t==='lmc')) h += audioSrcTag(setId, it.id);
+  if(o.audio && t==='lgroup') h += audioSrcTag(setId, g.id);
+  if(g && g.passage) h += `<div class="passage zh">${esc(g.passage).replace(/（(\w\d+)）/g,(m,id)=>`<span class="blank" ${id===it.id?'style="background:var(--warn-soft)"':''}>${itemNo(id)}</span>`)}</div>`;
+  const bank = (g && g.bank) || e.part.bank;
+  if(it.passage) h += `<div class="passage zh">${esc(it.passage)}</div>`;
+  if(t==='tf') h += `<div class="zh">★ ${esc(it.stem)}</div>`;
+  if(it.q) h += `<div class="zh">${esc(it.q)}</div>`;
+  if(it.text) h += `<div class="zh" style="white-space:pre-line">${esc(it.text)}</div>`;
+  const row = (k, txt) => { const ok = reveal && k===it.ans, bad = resp===k && k!==it.ans;
+    return `<div class="srow ${ok?'ok':''} ${bad?'bad':''}"><b>${esc(k)}</b><span class="zh">${esc(txt??'')}</span>${bad?'<span class="chip seal">내 답</span>':''}${ok?'<span class="chip">정답</span>':''}${bar(k)}</div>`; };
+  if(it.opts) h += it.opts.map((x,i)=>row(LETTERS[i], x)).join('');
+  else if(t==='tf') h += row('√','')+row('×','');
+  else if(bank && (t==='bank'||t==='sentfill')) h += Object.entries(bank).map(([k,v])=>row(k,v)).join('');
+  else if(t==='order'){ h += it.segs.map((x,i)=>`<div class="srow"><b>${LETTERS[i]}</b><span class="zh">${esc(x)}</span></div>`).join('');
+    h += `<div class="fbk">${resp?`내 답 <b class="mono">${esc(resp.split('').join('→'))}</b> · `:''}${reveal?`정답 <b class="mono">${it.ans.split('').join('→')}</b> <span class="zh" style="font-size:inherit">${esc(it.ans.split('').map(L=>it.segs[LETTERS.indexOf(L)]).join('，'))}。</span>`:''}</div>`;
+    if(dist) h += topDist(dist, n); }
+  else if(t==='arrange'){ h += `<div class="muted">${it.words.map(w=>`<span class="chip" style="background:var(--paper);color:var(--ink)">${esc(w)}</span>`).join(' ')}</div>`;
+    h += `<div class="fbk">${resp?`내 답 <span class="zh" style="font-size:inherit;color:var(--seal)">${esc(resp)}</span><br>`:''}${reveal?`정답 <span class="zh" style="font-size:inherit;color:var(--ok)">${esc(it.ans[0])}</span>`:''}</div>`;
+    if(dist) h += topDist(dist, n); }
+  if(reveal && it.exp) h += `<div class="fbk">💡 ${esc(it.exp)}</div>`;
+  const scr = it.script || (g && g.script);
+  if(scr) h += `<details ${o.scriptOpen?'open':''}><summary>녹음 스크립트</summary><div class="script zh">${esc(scr)}</div></details>`;
+  return h;
+}
+function topDist(dist, n){ return `<div class="muted" style="font-size:13px;margin-top:6px">학생 응답: ${Object.entries(dist).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([k,c])=>`<span class="zh" style="font-size:inherit">${esc(k)}</span> ${c}명`).join(' · ')}</div>`; }
+function ctxOf(e){ const it = e.item, g = e.group; return [g?.passage || g?.script || it.passage || it.script || '', (g?.bank||e.part.bank) ? '보기: ' + Object.entries(g?.bank||e.part.bank).map(([k,v])=>k+' '+v).join(' / ') : ''].filter(Boolean).join('\n'); }
+function qOf(e){ const it = e.item, t = e.part.type; return it.q || (it.stem ? '★ '+it.stem+' (√/× 판단)' : '') || it.text || (it.segs ? '순서 배열: '+it.segs.map((x,i)=>LETTERS[i]+' '+x).join(' / ') : '') || (t==='error'?'어법상 틀린 문장을 고르시오':'') || (t==='cloze'?`빈칸 ${itemNo(it.id)}에 알맞은 것`:'') || (t==='sentfill'?`빈칸 ${itemNo(it.id)}에 알맞은 문장`:'') || (t==='arrange'?'단어 배열: '+it.words.join(' / '):''); }
+async function explainAny(setId, id, mine, boxId){
+  const key = `hsk_exp_${setId}_${id}`, box = document.getElementById(boxId); const cached = LS.get(key, null);
+  const show = txt => { if(box) box.innerHTML = `<div class="ai" style="margin-top:6px;white-space:pre-wrap">💡 ${esc(txt)}</div>`; };
+  if(cached) return show(cached);
+  if(!CFG.SCRIPT_URL){ if(box) box.innerHTML = '<div class="muted" style="font-size:13px">구글시트 연결 후 AI 해설을 쓸 수 있어요.</div>'; return; }
+  const e = entryOf(setId, id); if(box) box.innerHTML = '<div class="muted">해설을 만드는 중…</div>';
+  try{ const r = await api({action:'explain', level:getSet(setId).level, context:ctxOf(e), question:qOf(e), opts:e.item.opts||[], answer:correctText(e), mine:mine||''});
+    if(r && r.ok && r.explanation){ LS.set(key, r.explanation); show(r.explanation); } else if(box) box.innerHTML = '<div class="muted" style="font-size:13px">AI 해설을 쓸 수 없어요 (GEMINI_API_KEY 필요).</div>'; }
+  catch(err){ if(box) box.innerHTML = '<div class="muted">네트워크 오류</div>'; }
+}
+
+// ── 학생: 오답노트 ──
+async function openNotebook(level){
+  S.view = 'notebook'; S.nb = {level: level || S.level, set:'all', status:'open'}; render();
+  if(CFG.SCRIPT_URL && S.user.h){
+    try{ const r = await api({action:'notebook', name:S.user.name, hash:S.user.h});
+      if(r && r.ok && r.items){ const nb = LS.get(nbKey(S.user.sid), {});
+        for(const x of r.items){ const k = x.set+'|'+x.id, l = nb[k]; if(!l || x.tries >= l.tries) nb[k] = x; }
+        LS.set(nbKey(S.user.sid), nb); if(S.view==='notebook') render(); } }catch(e){}
+  }
+}
+function viewNotebook(){
+  const f = S.nb, nb = Object.values(LS.get(nbKey(S.user.sid), {})).filter(x => x.misses>0 && getSet(x.set) && entryOf(x.set, x.id));
+  const rev = reviewedSet();
+  const lvItems = nb.filter(x => getSet(x.set).level===f.level);
+  let list = lvItems.filter(x => (f.set==='all' || x.set===f.set) && (f.status==='all' || (f.status==='open' ? !x.lastOk : x.lastOk)));
+  const order = id => flatOf(id.set).findIndex(e => e.item.id===id.id);
+  list.sort((a,b) => a.set===b.set ? order(a)-order(b) : a.set < b.set ? -1 : 1);
+  const sets = [...new Set(lvItems.map(x=>x.set))];
+  const open = lvItems.filter(x=>!x.lastOk).length;
+  app.innerHTML = topbar(`<button class="btn sm" data-act="print">🖨 인쇄·PDF</button><button class="btn sm" data-act="home">홈으로</button>`) + `<div class="wrap">
+    <h1>📒 ${esc(S.user.name)}님의 오답노트</h1>
+    <p class="muted">한 번이라도 틀린 문제가 모입니다. 다시 풀어서 맞히면 ‘해결됨’으로 바뀌어요. 🎓는 선생님이 재강의한 문제입니다.</p>
+    <div class="levels noprint">${[4,5,6].map(l=>`<button data-act="nblevel" data-v="${l}" aria-pressed="${f.level===l}">HSK ${l}급</button>`).join('')}</div>
+    <div class="nbbar noprint">
+      <select id="nbset">${['all',...sets].map(s=>`<option value="${s}" ${f.set===s?'selected':''}>${s==='all'?'모든 세트':esc(getSet(s).title)}</option>`).join('')}</select>
+      <div class="seg3">${[['open',`미해결 ${open}`],['done',`해결됨 ${lvItems.length-open}`],['all',`전체 ${lvItems.length}`]].map(([k,l])=>`<button data-act="nbstatus" data-v="${k}" aria-pressed="${f.status===k}">${l}</button>`).join('')}</div>
+    </div>
+    <div class="row noprint" style="margin:8px 0 4px">${sets.map(s=>{const n=LS.get(wrongKey(S.user.sid,s),[]).length; return n?`<button class="btn sm seal" data-act="start" data-set="${s}" data-scope="retry">${esc(getSet(s).title)} 오답 다시 풀기 (${n})</button>`:'';}).join('')}</div>
+    ${list.length ? list.map(x => { const e = entryOf(x.set, x.id), s = getSet(x.set); return `<div class="q nbq ${x.lastOk?'right':'wrong'}">
+      <div class="nbh"><span class="qn">${SEC_KO[e.sec.key]} ${itemNo(x.id)}</span><span class="muted" style="font-size:13px">${esc(s.title)} · ${esc(e.part.title)}</span><span class="sp"></span>
+        ${rev.has(x.set+'|'+x.id)?'<span class="chip warn">🎓 재강의</span>':''}<span class="chip seal">틀림 ${x.misses}회</span>${x.lastOk?'<span class="chip">해결됨 ✓</span>':''}</div>
+      ${staticQ(e, x.lastOk ? x.firstResp : x.lastResp, {setId:x.set, audio:true})}
+      ${x.lastOk && x.firstResp ? `<div class="muted" style="font-size:13px">처음 고른 답: ${esc(x.firstResp)} → 다시 풀어서 맞힘</div>`:''}
+      ${e.item.exp ? '' : `<div id="nbexp-${x.set}-${x.id}" class="noprint"><button class="btn sm" data-act="nbexplain" data-set="${x.set}" data-id="${x.id}" data-v="${esc(x.lastResp)}">💡 AI 해설 보기</button></div>`}
+    </div>`; }).join('') : `<div class="card muted">${lvItems.length ? '이 조건에 맞는 문제가 없어요.' : '아직 틀린 문제가 없어요. 문제를 풀고 제출하면 여기에 모입니다.'}</div>`}
+  </div>`;
+  document.getElementById('nbset').onchange = ev => { S.nb.set = ev.target.value; render(); };
+}
+
+// ── 교수자: 재강의 ──
+function viewTeacherTabs(active){
+  return `<div class="tabs" role="tablist">${[['stat','📊 현황'],['review','🎓 재강의'],['plan','🗓 수업 진행']].map(([k,l])=>`<button role="tab" data-act="ttab" data-v="${k}" aria-selected="${active===k}">${l}</button>`).join('')}</div>`;
+}
+function pinField(){ return `<div><label class="muted" style="font-size:13px">교사 PIN</label><input type="password" id="tpin" value="${esc(sessionStorage.getItem('hsk_pin')||'')}"></div>`; }
+function viewReview(){
+  const lv = S.rv?.level || S.cfg?.level || 4; S.rv = S.rv || {level:lv, sets:null, items:null, sel:new Set()};
+  const levelSets = SETS.filter(s => s.level===S.rv.level);
+  const chosen = S.rv.sets || levelSets.filter(s=>s.corner==='exam').map(s=>s.id);
+  const rev = reviewedSet();
+  let list = '';
+  if(S.rv.items){
+    const all = S.rv.items.filter(x => entryOf(x.set, x.id)?.obj && x.n>0);
+    const items = all.filter(x => x.wrong>0).sort((a,b) => b.wrong/b.n - a.wrong/a.n || b.wrong-a.wrong);
+    list = `<div class="nbbar" style="margin-top:16px"><b>많이 틀린 순 (${items.length}문항 · 응답 학생 ${S.rv.students}명)</b><span class="muted" style="font-size:13px">모두 맞힌 ${all.length-items.length}문항은 숨김</span><span class="sp"></span>
+      <button class="btn sm" data-act="rvauto">오답률 40%↑ 자동 선택</button><button class="btn sm" data-act="rvnone">선택 해제</button>
+      <button class="btn pri" data-act="rvstart" ${S.rv.sel.size?'':'disabled'}>▶ 선택한 ${S.rv.sel.size}문제로 재강의</button></div>
+      <table class="dash"><tr><th></th><th>문항</th><th>유형</th><th>오답률</th><th>틀린 학생</th><th>많이 고른 오답</th><th>재도전 해결</th></tr>
+      ${items.map(x=>{ const e = entryOf(x.set, x.id), p = Math.round(x.wrong/x.n*100), key = x.set+'|'+x.id;
+        const wrongTop = Object.entries(x.dist).filter(([k])=>k!==(Array.isArray(e.item.ans)?e.item.ans[0]:e.item.ans)).sort((a,b)=>b[1]-a[1])[0];
+        return `<tr><td><input type="checkbox" data-act="rvsel" data-v="${key}" ${S.rv.sel.has(key)?'checked':''}></td>
+        <td class="mono">${esc(getSet(x.set).corner==='exam'?'실전':'예제')}${esc(getSet(x.set).label)} · ${SEC_KO[e.sec.key]} ${itemNo(x.id)} ${rev.has(key)?'🎓':''}</td><td>${esc(e.part.title)}</td>
+        <td><div class="bar" style="width:90px;display:inline-block;vertical-align:middle;background:var(--ok-soft)"><i style="width:${p}%;background:var(--seal)"></i></div> <span class="mono">${p}%</span></td>
+        <td class="mono">${x.wrong}/${x.n}</td><td class="zh" style="font-size:14px">${wrongTop?esc(wrongTop[0])+' ('+wrongTop[1]+')':''}</td><td class="mono">${x.fixed||0}명</td></tr>`; }).join('') || '<tr><td colspan="7" class="muted">아직 제출 기록이 없어요.</td></tr>'}</table>`;
+  }
+  return `<div class="card" style="display:grid;gap:10px">
+    <div class="levels" style="margin:0">${[4,5,6].map(l=>`<button data-act="rvlevel" data-v="${l}" aria-pressed="${S.rv.level===l}">HSK ${l}급</button>`).join('')}</div>
+    <div><span class="muted" style="font-size:13px">모을 세트</span><div class="row">${levelSets.map(s=>`<label class="chk"><input type="checkbox" data-act="rvset" data-v="${s.id}" ${chosen.includes(s.id)?'checked':''}> ${s.corner==='exam'?'실전':'예제'} ${esc(s.label)} <span class="muted">(${esc(s.source||'요약')})</span></label>`).join('')}</div></div>
+    <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end">${pinField()}<button class="btn pri" data-act="rvload">많이 틀린 문제 모으기</button></div>
+  </div>${list}`;
+}
+async function loadReview(){
+  const pin = document.getElementById('tpin').value; sessionStorage.setItem('hsk_pin', pin);
+  const levelSets = SETS.filter(s => s.level===S.rv.level);
+  const sets = S.rv.sets || levelSets.filter(s=>s.corner==='exam').map(s=>s.id);
+  try{ const r = await apiGet({action:'review', pin, sets:sets.join(',')});
+    if(!r || !r.ok){ toast(r?.error || '불러오기 실패'); return; }
+    S.rv.items = r.items; S.rv.students = r.students; S.rv.sel = new Set();
+    r.items.filter(x => x.n && x.wrong/x.n >= 0.4).sort((a,b)=>b.wrong/b.n-a.wrong/a.n).slice(0,20).forEach(x => S.rv.sel.add(x.set+'|'+x.id));
+    render();
+  }catch(e){ toast('네트워크 오류'); }
+}
+function viewPlan(){
+  const c = S.cfg || {};
+  return `<div class="card" style="display:grid;gap:12px">
+    <p class="muted" style="margin:0">여기서 정한 단계가 학생 홈 화면의 ‘📍 지금 할 일’과 학습 순서에 표시됩니다.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label class="muted" style="font-size:13px">현재 급수</label><select id="pl-level">${[4,5,6].map(l=>`<option value="${l}" ${c.level===l?'selected':''}>HSK ${l}급</option>`).join('')}</select></div>
+      <div><label class="muted" style="font-size:13px">현재 단계</label><select id="pl-step">${STEPS.map(s=>`<option value="${s.key}" ${c.step===s.key?'selected':''}>${s.icon} ${s.name}</option>`).join('')}</select></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">${[4,5,6].map(l=>`<div><label class="muted" style="font-size:13px">${l}급 과제 마감일</label><input type="date" id="pl-due${l}" value="${esc((c.due||{})[l]||'')}"></div>`).join('')}</div>
+    <div><label class="muted" style="font-size:13px">학생에게 보일 안내 (선택)</label><input type="text" id="pl-note" value="${esc(c.note||'')}" placeholder="예: 금요일 줌 수업 전까지 실전 1·2회를 끝내 주세요"></div>
+    <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end">${pinField()}<button class="btn pri" data-act="plsave">저장</button></div>
+  </div>
+  <h2 style="margin-top:22px">수업 흐름</h2>
+  <ol class="muted" style="line-height:1.9">${[4,5,6].map(l=>`<li>HSK ${l}급: 예제 40문제(줌) → 과제 실전 1·2회 → 재강의(🎓 탭) → 학생별 오답 다시 풀기</li>`).join('')}</ol>`;
+}
+async function savePlan(){
+  const pin = document.getElementById('tpin').value; sessionStorage.setItem('hsk_pin', pin);
+  const c = {...(S.cfg||{}), level:+document.getElementById('pl-level').value, step:document.getElementById('pl-step').value,
+    due:{4:document.getElementById('pl-due4').value, 5:document.getElementById('pl-due5').value, 6:document.getElementById('pl-due6').value}, note:document.getElementById('pl-note').value.trim()};
+  await saveConfig(c, pin);
+}
+async function saveConfig(c, pin){
+  if(!CFG.SCRIPT_URL){ S.cfg = c; LS.set('hsk_cfg', c); toast('이 기기에 저장했어요 (시트 연결 전).'); render(); return; }
+  try{ const r = await api({action:'setConfig', pin: pin || sessionStorage.getItem('hsk_pin') || '', config:c});
+    if(r && r.ok){ S.cfg = r.config; LS.set('hsk_cfg', S.cfg); toast('✅ 저장했어요. 학생 화면에 반영됩니다.'); render(); } else toast(r?.error || '저장 실패'); }
+  catch(e){ toast('네트워크 오류'); }
+}
+
+// ── 재강의 발표 모드 (줌 화면 공유용) ──
+function startLecture(){
+  const keys = [...S.rv.sel];
+  const byKey = Object.fromEntries(S.rv.items.map(x => [x.set+'|'+x.id, x]));
+  S.lec = {list: keys.map(k => byKey[k]).filter(Boolean).sort((a,b)=>b.wrong/b.n-a.wrong/a.n), i:0, show:{}};
+  S.prevSize = document.body.dataset.size; document.body.dataset.size = 'xl'; S.view = 'lecture'; render();
+}
+function viewLecture(){
+  const L = S.lec, x = L.list[L.i], e = entryOf(x.set, x.id), s = getSet(x.set), sh = L.show, p = Math.round(x.wrong/x.n*100);
+  app.innerHTML = `<div class="lec">
+    <div class="lecbar"><b>🎓 재강의 ${L.i+1} / ${L.list.length}</b><span class="muted">${esc(s.title)} · ${SEC_KO[e.sec.key]} ${itemNo(x.id)} · ${esc(e.part.title)}</span><span class="sp"></span>
+      <span class="chip seal">오답률 ${p}% (${x.n}명 중 ${x.wrong}명)</span><button class="btn sm" data-act="lecexit">끝내기</button></div>
+    <div class="lecbody q">${staticQ(e, null, {setId:x.set, audio:true, reveal:!!sh.ans, dist: sh.dist ? x.dist : null, n:x.n, scriptOpen:!!sh.script})}
+      <div id="lecexp"></div>
+      ${sh.names ? `<div class="fbk">틀린 학생: ${x.missed.map(esc).join(', ')}</div>` : ''}
+    </div>
+    <div class="lecctl">
+      <button class="btn" data-act="lecnav" data-v="-1" ${L.i?'':'disabled'}>← 이전</button>
+      <button class="btn ${sh.dist?'pri':''}" data-act="lecshow" data-v="dist">📊 응답 분포</button>
+      <button class="btn ${sh.ans?'pri':''}" data-act="lecshow" data-v="ans">✅ 정답 공개</button>
+      <button class="btn ${sh.script?'pri':''}" data-act="lecshow" data-v="script">📜 스크립트</button>
+      <button class="btn" data-act="lecexplain">💡 AI 해설</button>
+      <button class="btn ${sh.names?'pri':''}" data-act="lecshow" data-v="names" title="화면 공유 중에는 주의">👤 틀린 학생</button>
+      <button class="btn" data-act="lecnav" data-v="1" ${L.i<L.list.length-1?'':'disabled'}>다음 →</button>
+    </div>
+    <div class="muted" style="text-align:center;font-size:12px">키보드: ← → 이동 · D 분포 · A 정답 · S 스크립트</div>
+  </div>`;
+}
+document.addEventListener('keydown', ev => {
+  if(S.view !== 'lecture' || ev.target.closest('input,textarea,select')) return;
+  const k = ev.key.toLowerCase();
+  if(k==='arrowright' && S.lec.i < S.lec.list.length-1){ S.lec.i++; S.lec.show={}; render(); }
+  else if(k==='arrowleft' && S.lec.i > 0){ S.lec.i--; S.lec.show={}; render(); }
+  else if({d:'dist',a:'ans',s:'script'}[k]){ const f={d:'dist',a:'ans',s:'script'}[k]; S.lec.show[f]=!S.lec.show[f]; render(); }
+});
+async function endLecture(){
+  document.body.dataset.size = S.prevSize || 'm';
+  const done = S.lec.list;
+  S.view = 'teacher'; S.ttab = 'review'; render();
+  if(done.length && confirm(`방금 설명한 ${done.length}문제를 ‘재강의함’으로 표시할까요? 학생 오답노트에 🎓 표시가 붙습니다.`)){
+    const c = {...(S.cfg||{})}; c.reviewed = {...(c.reviewed||{})};
+    for(const x of done){ const a = new Set(c.reviewed[x.set]||[]); a.add(x.id); c.reviewed[x.set] = [...a]; }
+    await saveConfig(c);
+  }
 }
 
 // ── events ──
@@ -859,6 +1147,24 @@ document.addEventListener('click', ev => {
   else if(act === 'exam'){ startTest(b.dataset.set, 'exam', v === 'resume'); }
   else if(act === 'corner'){ S.corner = v; LS.set('hsk_corner', v); render(); }
   else if(act === 'explain'){ explain(id); }
+  else if(act === 'notebook'){ openNotebook(v ? +v : S.level); }
+  else if(act === 'nblevel'){ S.nb.level = +v; S.nb.set = 'all'; render(); }
+  else if(act === 'nbstatus'){ S.nb.status = v; render(); }
+  else if(act === 'nbexplain'){ explainAny(b.dataset.set, id, v, `nbexp-${b.dataset.set}-${id}`); }
+  else if(act === 'print'){ document.querySelectorAll('details').forEach(d => d.open = true); window.print(); }
+  else if(act === 'ttab'){ S.ttab = v; render(); }
+  else if(act === 'rvlevel'){ S.rv = {level:+v, sets:null, items:null, sel:new Set()}; render(); }
+  else if(act === 'rvset'){ const lv = SETS.filter(x=>x.level===S.rv.level); const cur = new Set(S.rv.sets || lv.filter(x=>x.corner==='exam').map(x=>x.id)); b.checked ? cur.add(v) : cur.delete(v); S.rv.sets = [...cur]; S.rv.items = null; }
+  else if(act === 'rvload'){ loadReview(); }
+  else if(act === 'rvsel'){ b.checked ? S.rv.sel.add(v) : S.rv.sel.delete(v); const st = document.querySelector('[data-act=rvstart]'); if(st){ st.disabled = !S.rv.sel.size; st.textContent = `▶ 선택한 ${S.rv.sel.size}문제로 재강의`; } }
+  else if(act === 'rvauto'){ S.rv.sel = new Set(S.rv.items.filter(x => x.n && x.wrong/x.n >= 0.4 && entryOf(x.set,x.id)?.obj).map(x => x.set+'|'+x.id)); render(); }
+  else if(act === 'rvnone'){ S.rv.sel = new Set(); render(); }
+  else if(act === 'rvstart'){ startLecture(); }
+  else if(act === 'lecnav'){ S.lec.i += +v; S.lec.show = {}; render(); }
+  else if(act === 'lecshow'){ S.lec.show[v] = !S.lec.show[v]; render(); }
+  else if(act === 'lecexplain'){ const x = S.lec.list[S.lec.i]; explainAny(x.set, x.id, '', 'lecexp'); }
+  else if(act === 'lecexit'){ endLecture(); }
+  else if(act === 'plsave'){ savePlan(); }
   else if(act === 'submit'){ submit(); }
   else if(act === 'retrynow'){ startTest(S.set.id, 'retry'); }
   else if(act === 'rec'){ toggleRec(id); }
@@ -868,8 +1174,9 @@ document.addEventListener('click', ev => {
 });
 document.body.dataset.size = LS.get('hsk_font', 'm');
 if(S.user && !S.user.h) S.user = null;   // older sessions: ask for name + password once
+S.cfg = LS.get('hsk_cfg', {});
 if(S.user){ S.view = 'home'; syncWrong(); syncProgress(); }
-render();
+render(); loadConfig();
 </script>
 </body>
 </html>

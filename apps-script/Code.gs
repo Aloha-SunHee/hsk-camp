@@ -53,6 +53,11 @@ function doGet(e) {
       if (!p.pin || p.pin !== prop_('TEACHER_PIN', '')) return out_({ ok: false, error: 'PIN이 맞지 않습니다.' });
       return out_(summary_(String(p.set || '')));
     }
+    if (p.action === 'review') {
+      if (!p.pin || p.pin !== prop_('TEACHER_PIN', '')) return out_({ ok: false, error: 'PIN이 맞지 않습니다.' });
+      return out_(review_(String(p.sets || '').split(',').filter(Boolean)));
+    }
+    if (p.action === 'config') return out_({ ok: true, config: getConfig_() });
     return out_({ ok: true, msg: 'HSK backend is running', ai: !!prop_('GEMINI_API_KEY', '') });
   } catch (err) { return out_({ ok: false, error: String(err) }); }
 }
@@ -83,7 +88,7 @@ function summary_(set) {
   const av = sheet_('ans').getDataRange().getValues();
   const seen = {};
   for (let i = 1; i < av.length; i++) {
-    const r = av[i]; if (r[3] !== set || r[4] !== 'test' || (r[10] !== 'O' && r[10] !== 'X')) continue;
+    const r = av[i]; if (r[3] !== set || (r[4] !== 'test' && r[4] !== 'exam') || (r[10] !== 'O' && r[10] !== 'X')) continue;
     seen[r[1] + '|' + r[5]] = { id: r[5], ok: r[10] === 'O' };
   }
   const items = {};
@@ -94,6 +99,54 @@ function summary_(set) {
   return { ok: true, students: students, items: items, inprog: inprog };
 }
 
+// ───────── 재강의: 여러 세트에서 많이 틀린 문항 모으기 ─────────
+// 학생마다 ‘처음 풀이(test/exam)’의 마지막 응답 기준. 보기별 선택 수와 틀린 학생 이름을 함께 돌려줍니다.
+function review_(sets) {
+  const want = {}; sets.forEach(s => want[s] = true);
+  const av = sheet_('ans').getDataRange().getValues();
+  const seen = {};
+  for (let i = 1; i < av.length; i++) {
+    const r = av[i];
+    if (!want[r[3]] || (r[4] !== 'test' && r[4] !== 'exam') || (r[10] !== 'O' && r[10] !== 'X')) continue;
+    seen[r[3] + '|' + r[5] + '|' + r[1]] = { set: r[3], id: r[5], name: String(r[2] || r[1]), resp: String(r[8]), ok: r[10] === 'O' };
+  }
+  const items = {}, students = {};
+  Object.keys(seen).forEach(k => {
+    const s = seen[k], key = s.set + '|' + s.id;
+    const it = items[key] = items[key] || { set: s.set, id: s.id, n: 0, wrong: 0, dist: {}, missed: [] };
+    it.n++; students[s.name] = true;
+    it.dist[s.resp || '(무응답)'] = (it.dist[s.resp || '(무응답)'] || 0) + 1;
+    if (!s.ok) { it.wrong++; it.missed.push(s.name); }
+  });
+  // 재도전 후 해결한 학생 수
+  const fixed = {};
+  for (let i = 1; i < av.length; i++) {
+    const r = av[i]; if (!want[r[3]] || r[4] !== 'retry') continue;
+    const key = r[3] + '|' + r[5]; (fixed[key] = fixed[key] || {})[r[1]] = r[10] === 'O';
+  }
+  Object.keys(items).forEach(k => { const f = fixed[k] || {}; items[k].fixed = Object.keys(f).filter(x => f[x]).length; });
+  return { ok: true, items: Object.keys(items).map(k => items[k]), students: Object.keys(students).length };
+}
+
+// ───────── 학생 오답노트: 한 번이라도 틀린 문항의 이력 ─────────
+function notebook_(p) {
+  if (!auth_(p)) return { ok: false, error: 'auth' };
+  const name = String(p.name).trim();
+  const av = sheet_('ans').getDataRange().getValues(), map = {};
+  for (let i = 1; i < av.length; i++) {
+    const r = av[i]; if (String(r[1]) !== name || (r[10] !== 'O' && r[10] !== 'X')) continue;
+    const key = r[3] + '|' + r[5];
+    const it = map[key] = map[key] || { set: r[3], id: r[5], tries: 0, misses: 0, firstResp: '', lastResp: '', lastOk: false, lastAt: '' };
+    it.tries++; if (r[10] === 'X') { it.misses++; if (!it.firstResp) it.firstResp = String(r[8]); }
+    it.lastResp = String(r[8]); it.lastOk = r[10] === 'O'; it.lastAt = String(r[0]);
+  }
+  return { ok: true, items: Object.keys(map).map(k => map[k]).filter(x => x.misses > 0) };
+}
+
+// ───────── 수업 진행 설정 (현재 단계·마감일·재강의한 문항) ─────────
+function getConfig_() {
+  try { return JSON.parse(prop_('CLASS_CONFIG', '{}')); } catch (e) { return {}; }
+}
 
 // ───────── POST: 제출 / 피드백 ─────────
 function doPost(e) {
@@ -107,6 +160,12 @@ function doPost(e) {
     if (p.action === 'loadProgress') return out_(loadProgress_(p));
     if (p.action === 'clearProgress') return out_(clearProgress_(p));
     if (p.action === 'explain') return out_(explain_(p));
+    if (p.action === 'notebook') return out_(notebook_(p));
+    if (p.action === 'setConfig') {
+      if (!p.pin || p.pin !== prop_('TEACHER_PIN', '')) return out_({ ok: false, error: 'PIN이 맞지 않습니다.' });
+      PropertiesService.getScriptProperties().setProperty('CLASS_CONFIG', JSON.stringify(p.config || {}));
+      return out_({ ok: true, config: getConfig_() });
+    }
     return out_({ ok: false, error: 'unknown action' });
   } catch (err) { return out_({ ok: false, error: String(err) }); }
 }
