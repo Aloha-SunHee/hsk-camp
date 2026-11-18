@@ -1098,10 +1098,11 @@ async function endLecture(){
   document.body.dataset.size = S.prevSize || 'm';
   const done = S.lec.list;
   S.view = 'teacher'; S.ttab = 'review'; render();
-  if(done.length && confirm(`방금 설명한 ${done.length}문제를 ‘재강의함’으로 표시할까요? 학생 오답노트에 🎓 표시가 붙습니다.`)){
+  if(done.length){  // 재강의를 끝내면 자동으로 ‘재강의함’ 표시 → 학생 오답노트에 🎓
     const c = {...(S.cfg||{})}; c.reviewed = {...(c.reviewed||{})};
     for(const x of done){ const a = new Set(c.reviewed[x.set]||[]); a.add(x.id); c.reviewed[x.set] = [...a]; }
     await saveConfig(c);
+    toast(`🎓 ${done.length}문제를 ‘재강의함’으로 표시했어요. 학생 오답노트에 반영됩니다.`, 4000);
   }
 }
 
