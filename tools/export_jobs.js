@@ -1,7 +1,7 @@
 // Usage: node export_jobs.js data/hsk4a.js ... > jobs.json
 // Turns question data into a list of audio jobs: {out, speed, segs:[{v:'F'|'M'|'N'|'P', t, pause}]}
 const fs=require('fs'), vm=require('vm');
-const ctx={window:{}}; ctx.HSK_SETS=ctx.window.HSK_SETS=[]; vm.createContext(ctx);
+const ctx={window:{}}; ctx.HSK_SETS=ctx.window.HSK_SETS=[]; ctx.HSK_PRACTICE=ctx.window.HSK_PRACTICE=[]; vm.createContext(ctx);
 for(const f of process.argv.slice(2)) vm.runInContext(fs.readFileSync(f,'utf8'),ctx);
 const SPEED={4:0.92,5:0.96,6:1.0};
 function lines(script, narrator){
@@ -12,7 +12,7 @@ function lines(script, narrator){
   });
 }
 const jobs=[];
-for(const s of ctx.HSK_SETS){
+for(const s of [...ctx.HSK_SETS, ...ctx.HSK_PRACTICE]){
   const sp=SPEED[s.level], dir=s.id; let gi=0;
   for(const sec of s.sections) for(const p of sec.parts){
     if(p.type==='tf') for(const it of p.items) jobs.push({out:`${dir}/${it.id}.mp3`,speed:sp,segs:[...lines(it.script,'P'),{v:'N',t:it.stem,pause:1.0}]});

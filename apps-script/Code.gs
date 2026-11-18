@@ -3,7 +3,7 @@
  *
  * 설치
  *  1. 새 구글시트 → 확장 프로그램 → Apps Script → 이 파일 내용을 붙여 넣고 저장
- *  2. 함수 목록에서 setup 을 한 번 실행 (권한 허용) → 시트 3개가 만들어집니다
+ *  2. 함수 목록에서 setup 을 한 번 실행 (권한 허용) → 시트 5개가 만들어집니다
  *  3. 프로젝트 설정(톱니바퀴) → 스크립트 속성 추가
  *       TEACHER_PIN    : 교사용 현황 화면 비밀번호 (예: 2580)
  *       GEMINI_API_KEY : (선택) https://aistudio.google.com/apikey 에서 발급한 키 → 쓰기·말하기 AI 피드백
@@ -12,12 +12,14 @@
  *  5. 웹 앱 URL 을 웹앱의 config.js 의 SCRIPT_URL 에 붙여 넣기
  *  ※ 코드를 고친 뒤에는 ‘배포 관리 → 수정 → 새 버전’으로 다시 배포해야 반영됩니다.
  */
-const SCOPE_KO = { all: '전체', L: '듣기', R: '독해', W: '쓰기', S: '말하기' };
-const SH = { sub: '제출기록', ans: '문항기록', fb: '쓰기말하기' };
+const SCOPE_KO = { exam: '실전', all: '전체', L: '듣기', R: '독해', W: '쓰기', S: '말하기' };
+const SH = { sub: '제출기록', ans: '문항기록', fb: '쓰기말하기', stu: '학생', prog: '진행상황' };
 const HEAD = {
-  sub: ['시간', '학번', '이름', '세트', '모드', '범위', '점수', '만점', '정답률', '듣기', '독해', '쓰기', '소요(분)', '오답문항'],
-  ans: ['시간', '학번', '이름', '세트', '모드', '문항', '영역', '유형', '학생답', '정답', '정오', '점수'],
-  fb:  ['시간', '학번', '이름', '세트', '문항', '유형', '과제', '학생답안', '점수', 'AI 총평', 'AI 피드백(JSON)']
+  stu: ['이름', '비번해시', '가입', '최근접속'],
+  prog: ['이름', '세트', '진행률', '저장시간', '데이터(JSON)'],
+  sub: ['시간', 'ID', '이름', '세트', '모드', '범위', '점수', '만점', '정답률', '듣기', '독해', '쓰기', '소요(분)', '오답문항'],
+  ans: ['시간', 'ID', '이름', '세트', '모드', '문항', '영역', '유형', '학생답', '정답', '정오', '점수'],
+  fb:  ['시간', 'ID', '이름', '세트', '문항', '유형', '과제', '학생답안', '점수', 'AI 총평', 'AI 피드백(JSON)']
 };
 
 function setup() {
@@ -29,7 +31,7 @@ function setup() {
     sh.setFrozenRows(1);
   });
   const def = ss.getSheetByName('시트1') || ss.getSheetByName('Sheet1');
-  if (def && ss.getSheets().length > 3) ss.deleteSheet(def);
+  if (def && ss.getSheets().length > 5) ss.deleteSheet(def);
 }
 
 function sheet_(k) {
@@ -75,7 +77,7 @@ function summary_(set) {
     const r = sv[i]; if (r[3] !== set) continue;
     const prev = latest[r[1]];
     if (r[4] === 'retry') { if (prev) prev.retry = (prev.retry || 0) + 1; else latest[r[1]] = { sid: String(r[1]), name: r[2], mode: '오답만', score: r[6], total: r[7], time: String(r[0]).slice(5, 16), retry: 1 }; continue; }
-    latest[r[1]] = { sid: String(r[1]), name: r[2], mode: SCOPE_KO[r[5]] || r[5], score: r[6], total: r[7], L: r[9], R: r[10], W: r[11], time: String(r[0]).slice(5, 16), retry: prev ? prev.retry || 0 : 0 };
+    latest[r[1]] = { sid: String(r[1]), name: r[2], mode: r[4] === 'exam' ? '실전' : (SCOPE_KO[r[5]] || r[5]), score: r[6], total: r[7], L: r[9], R: r[10], W: r[11], time: String(r[0]).slice(5, 16), retry: prev ? prev.retry || 0 : 0 };
   }
   // 문항 통계: 학생별 ‘처음 푼(test 모드) 마지막 응답’ 기준
   const av = sheet_('ans').getDataRange().getValues();
@@ -87,8 +89,11 @@ function summary_(set) {
   const items = {};
   Object.keys(seen).forEach(k => { const s = seen[k]; const it = items[s.id] = items[s.id] || { n: 0, wrong: 0 }; it.n++; if (!s.ok) it.wrong++; });
   const students = Object.keys(latest).map(k => latest[k]).sort((a, b) => a.sid < b.sid ? -1 : 1);
-  return { ok: true, students: students, items: items };
+  const pv = sheet_('prog').getDataRange().getValues(), inprog = [];
+  for (let i = 1; i < pv.length; i++) if (pv[i][1] === set) inprog.push({ name: String(pv[i][0]), pct: pv[i][2], time: String(pv[i][3]).slice(5, 16) });
+  return { ok: true, students: students, items: items, inprog: inprog };
 }
+
 
 // ───────── POST: 제출 / 피드백 ─────────
 function doPost(e) {
@@ -97,6 +102,11 @@ function doPost(e) {
   try {
     if (p.action === 'submit') return out_(submit_(p));
     if (p.action === 'feedback') return out_(feedback_(p));
+    if (p.action === 'login') return out_(login_(p));
+    if (p.action === 'saveProgress') return out_(saveProgress_(p));
+    if (p.action === 'loadProgress') return out_(loadProgress_(p));
+    if (p.action === 'clearProgress') return out_(clearProgress_(p));
+    if (p.action === 'explain') return out_(explain_(p));
     return out_({ ok: false, error: 'unknown action' });
   } catch (err) { return out_({ ok: false, error: String(err) }); }
 }
@@ -126,6 +136,80 @@ function feedback_(p) {
       fb ? fb.score : (p.score === '' ? '' : p.score), fb ? fb.summary : (err ? 'AI 오류: ' + err.slice(0, 200) : ''), fb ? JSON.stringify(fb) : '']);
   } finally { lock.releaseLock(); }
   return { ok: true, feedback: fb, error: err };
+}
+
+// ───────── 학생 계정 / 이어 풀기 ─────────
+function findRow_(sh, pred) {
+  const v = sh.getDataRange().getValues();
+  for (let i = 1; i < v.length; i++) if (pred(v[i])) return { row: i + 1, val: v[i] };
+  return null;
+}
+function login_(p) {
+  const name = String(p.name || '').trim(), h = String(p.hash || '');
+  if (!name || !h) return { ok: false, error: '이름과 비밀번호를 입력하세요.' };
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const sh = sheet_('stu'), f = findRow_(sh, r => String(r[0]) === name);
+    if (!f) { sh.appendRow([name, h, now_(), now_()]); return { ok: true, created: true }; }
+    if (String(f.val[1]) !== h) return { ok: false, error: '비밀번호가 맞지 않습니다. (처음이라면 다른 이름 표기를 쓰세요, 예: 김민수2)' };
+    sh.getRange(f.row, 4).setValue(now_());
+    return { ok: true, created: false };
+  } finally { lock.releaseLock(); }
+}
+function auth_(p) {
+  const f = findRow_(sheet_('stu'), r => String(r[0]) === String(p.name || '').trim());
+  return !!f && String(f.val[1]) === String(p.hash || '');
+}
+function saveProgress_(p) {
+  if (!auth_(p)) return { ok: false, error: 'auth' };
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const sh = sheet_('prog'), name = String(p.name).trim();
+    const f = findRow_(sh, r => String(r[0]) === name && r[1] === p.setId);
+    const row = [name, p.setId, p.pct || 0, now_(), JSON.stringify(p.data || {}).slice(0, 49000)];
+    if (f) sh.getRange(f.row, 1, 1, row.length).setValues([row]); else sh.appendRow(row);
+  } finally { lock.releaseLock(); }
+  return { ok: true };
+}
+function loadProgress_(p) {
+  if (!auth_(p)) return { ok: false, error: 'auth' };
+  const v = sheet_('prog').getDataRange().getValues(), res = {}, name = String(p.name).trim();
+  for (let i = 1; i < v.length; i++) if (String(v[i][0]) === name) { try { res[v[i][1]] = JSON.parse(v[i][4]); } catch (e) {} }
+  // 다른 기기에서도 점수 기록이 보이도록 성적 이력도 함께 보냅니다
+  const sv = sheet_('sub').getDataRange().getValues(), history = [];
+  for (let i = 1; i < sv.length; i++) if (String(sv[i][1]) === name) history.push({ set: sv[i][3], mode: sv[i][4], scope: sv[i][5], c: sv[i][6], t: sv[i][7], at: String(sv[i][0]) });
+  return { ok: true, progress: res, history: history };
+}
+function clearProgress_(p) {
+  if (!auth_(p)) return { ok: false, error: 'auth' };
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const sh = sheet_('prog'), name = String(p.name).trim();
+    const f = findRow_(sh, r => String(r[0]) === name && r[1] === p.setId);
+    if (f) sh.deleteRow(f.row);
+  } finally { lock.releaseLock(); }
+  return { ok: true };
+}
+function explain_(p) {
+  const key = prop_('GEMINI_API_KEY', '');
+  if (!key) return { ok: true, explanation: null };
+  const prompt = [
+    '너는 한국 대학생에게 HSK ' + p.level + '급을 가르치는 중국어 교사다. 아래 문항의 정답 이유를 한국어로 짧고 정확하게 설명하라.',
+    p.context ? '지문/녹음 원문:\n"""' + String(p.context).slice(0, 2500) + '"""' : '',
+    p.question ? '문제: ' + p.question : '',
+    (p.opts && p.opts.length) ? '선택지: ' + p.opts.map((o, i) => 'ABCDEF'[i] + ' ' + o).join(' / ') : '',
+    '정답: ' + p.answer,
+    p.mine ? '학생이 고른 답: ' + p.mine : '',
+    '형식: ① 정답 근거가 되는 원문 표현(중국어 인용 1~2곳) ② 왜 정답인지 1~2문장 ③ 학생 답이 틀렸다면 왜 틀렸는지 1문장 ④ 핵심 어휘 2~3개(중국어-병음-뜻). 전체 6줄 이내, 마크다운 기호 없이 일반 텍스트.'
+  ].filter(Boolean).join('\n\n');
+  const model = prop_('GEMINI_MODEL', 'gemini-2.5-flash');
+  const res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key), {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2 } })
+  });
+  if (res.getResponseCode() !== 200) return { ok: false, error: 'Gemini ' + res.getResponseCode() };
+  const j = JSON.parse(res.getContentText());
+  return { ok: true, explanation: j.candidates[0].content.parts.map(x => x.text || '').join('').trim() };
 }
 
 const KIND_DESC = {

@@ -56,6 +56,7 @@ input[type=text],input[type=password],select{width:100%;padding:11px 12px;border
 .levels{display:flex;gap:8px;margin:18px 0 12px}
 .levels button{flex:1;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:12px;font-weight:700;font-size:16px}
 .levels button[aria-pressed=true]{background:var(--jade);color:var(--jade-ink);border-color:var(--jade)}
+.corners{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0 8px}.corners button{text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:14px 16px}.corners button b{display:block;font-size:16px}.corners button span{font-size:12.5px;color:var(--muted)}.corners button[aria-selected=true]{border-color:var(--jade);box-shadow:inset 0 0 0 1px var(--jade);background:var(--jade-soft)}
 .sets{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
 .set h2{display:flex;align-items:center;gap:8px}
 .set .meta{font-size:13px;color:var(--muted);margin-bottom:12px}
@@ -78,6 +79,7 @@ input[type=text],input[type=password],select{width:100%;padding:11px 12px;border
 audio{width:100%;height:38px;margin:4px 0 8px}
 .opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-top:6px}
 .opts.col{grid-template-columns:1fr}
+.opts.wide{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}.opts.wide .zh{white-space:nowrap}
 .opt{display:flex;gap:10px;align-items:flex-start;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:9px 12px}
 .opt b{font-family:var(--f-num);color:var(--muted);min-width:1.2em}
 .opt:hover{border-color:var(--jade)}
@@ -139,6 +141,12 @@ table.dash th{font-size:12px;color:var(--muted)}
 <script src="data/hsk5b.js"></script>
 <script src="data/hsk6a.js"></script>
 <script src="data/hsk6b.js"></script>
+<script src="data/practice/p4a.js"></script>
+<script src="data/practice/p4b.js"></script>
+<script src="data/practice/p5a.js"></script>
+<script src="data/practice/p5b.js"></script>
+<script src="data/practice/p6a.js"></script>
+<script src="data/practice/p6b.js"></script>
 <script>
 'use strict';
 const CFG = window.APP_CONFIG || {};
@@ -204,6 +212,55 @@ async function apiGet(params){
   const r = await fetch(CFG.SCRIPT_URL + '?' + new URLSearchParams(params));
   return r.json();
 }
+async function hashPw(name, pw){
+  const txt = 'hsk-camp|' + name + '|' + pw;
+  try{ const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt)); return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+  catch(e){ let h = 5381; for(const c of txt) h = (h*33 + c.charCodeAt(0)) >>> 0; return 'x' + h.toString(16); }
+}
+const progKey = (sid, set) => `hsk_prog_${sid}_${set}`;
+async function syncProgress(){
+  if(!CFG.SCRIPT_URL || !S.user || !S.user.h) return;
+  try{
+    const r = await api({action:'loadProgress', name:S.user.name, hash:S.user.h});
+    if(r && r.ok && Array.isArray(r.history)){
+      const hist = LS.get(histKey(S.user.sid), []);
+      for(const h of r.history){
+        const at = new Date(String(h.at).replace(' ', 'T') + '+09:00').getTime();
+        if(!hist.some(x => x.set === h.set && x.c === h.c && Math.abs(x.at - at) < 120000)) hist.push({set:h.set, mode:h.mode, scope:h.scope, c:+h.c, t:+h.t, at});
+      }
+      hist.sort((a,b) => a.at - b.at); LS.set(histKey(S.user.sid), hist.slice(-200));
+    }
+    if(r && r.ok && r.progress){
+      for(const set of SETS.filter(x => x.corner === 'exam')){
+        const srv = r.progress[set.id], loc = LS.get(progKey(S.user.sid, set.id), null);
+        if(srv && (!loc || (srv.savedAt||0) > (loc.savedAt||0))) LS.set(progKey(S.user.sid, set.id), srv);
+        if(!srv && loc && loc.savedAt){
+          const hist = LS.get(histKey(S.user.sid), []);
+          // finished on another device after this save → drop the stale local copy instead of re-uploading it
+          if(hist.some(h => h.set === set.id && h.mode === 'exam' && h.at > loc.savedAt)) LS.set(progKey(S.user.sid, set.id), null);
+          else pushProgress(set.id, loc, true);
+        }
+      }
+      if(S.view === 'home') render();
+    }
+  }catch(e){}
+}
+let pushTimer = null;
+function pushProgress(setId, data, now){
+  if(!CFG.SCRIPT_URL || !S.user?.h) return;
+  clearTimeout(pushTimer);
+  const go = () => api({action:'saveProgress', name:S.user.name, hash:S.user.h, setId, pct:data.pct||0, data}).then(r => { const el = document.getElementById('saved'); if(el && r && r.ok) el.textContent = '☁️ 저장됨 ' + new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}); }).catch(()=>{});
+  if(now) go(); else pushTimer = setTimeout(go, 4000);
+}
+function persist(now){
+  if(S.view !== 'test' || S.mode !== 'exam' || S.submitted) return;
+  const sub = {}; for(const k in S.sub){ const {fbHTML, diffHTML, ...rest} = S.sub[k]; sub[k] = rest; }
+  const obj = S.entries.filter(e=>e.obj), done = obj.filter(e => S.ans[e.item.id] != null && S.ans[e.item.id] !== '').length;
+  const data = {v:1, ans:S.ans, sub, elapsed:Math.round((Date.now()-S.t0)/1000), tab:S.tab, savedAt:Date.now(), pct: Math.round(done/Math.max(1,obj.length)*100)};
+  LS.set(progKey(S.user.sid, S.set.id), data);
+  const el = document.getElementById('saved'); if(el) el.textContent = '💾 이 기기에 저장됨';
+  pushProgress(S.set.id, data, now);
+}
 async function syncWrong(){
   if(!CFG.SCRIPT_URL || !S.user) return;
   try{
@@ -229,17 +286,31 @@ function topbar(right=''){
 
 function viewLogin(){
   app.innerHTML = `<div class="wrap"><div class="login card">
-    <h1>HSK 모의고사</h1><p class="muted">${esc(CFG.CLASS_NAME||'')}<br>학번과 이름을 입력하면 점수와 오답이 기록됩니다.</p>
+    <h1>HSK 모의고사</h1><p class="muted">${esc(CFG.CLASS_NAME||'')}<br>이름과 비밀번호로 들어오면 점수·오답·풀던 시험이 저장되어 <b>다른 기기에서도 이어서</b> 풀 수 있어요.</p>
     <form id="loginForm">
-      <label for="sid">${esc(CFG.ID_LABEL||'학번')}</label><input type="text" id="sid" required autocomplete="off" value="${esc(S.user?.sid||'')}">
-      <label for="sname">이름</label><input type="text" id="sname" required autocomplete="off" value="${esc(S.user?.name||'')}">
-      <div style="margin-top:18px"><button class="btn pri" style="width:100%;padding:12px">시작하기</button></div>
+      <label for="sname">이름</label><input type="text" id="sname" required autocomplete="username" value="${esc(S.user?.name||'')}">
+      <label for="spw">비밀번호 <span class="muted" style="font-weight:400;font-size:13px">(처음이면 지금 정한 비밀번호가 등록됩니다 · 4자 이상)</span></label><input type="password" id="spw" required minlength="4" autocomplete="current-password">
+      <div class="muted" id="loginMsg" style="min-height:1.4em;margin-top:8px;font-size:14px"></div>
+      <div style="margin-top:8px"><button class="btn pri" style="width:100%;padding:12px">들어가기</button></div>
     </form></div></div>`;
-  document.getElementById('loginForm').onsubmit = ev => {
+  document.getElementById('loginForm').onsubmit = async ev => {
     ev.preventDefault();
-    S.user = {sid: document.getElementById('sid').value.trim(), name: document.getElementById('sname').value.trim()};
-    if(!S.user.sid || !S.user.name) return;
-    LS.set('hsk_user', S.user); S.view = 'home'; render(); syncWrong();
+    const name = document.getElementById('sname').value.trim().replace(/\s+/g,' '), pw = document.getElementById('spw').value;
+    const msg = document.getElementById('loginMsg');
+    if(!name || pw.length < 4){ msg.textContent = '이름과 4자 이상의 비밀번호를 입력하세요.'; return; }
+    msg.textContent = '확인 중…';
+    const h = await hashPw(name, pw);
+    let ok = null, err = '';
+    if(CFG.SCRIPT_URL){
+      try{ const r = await api({action:'login', name, hash:h}); if(r){ ok = !!r.ok; err = r.error || ''; if(r.created) toast('새 계정이 만들어졌어요. 비밀번호를 기억하세요!'); } }catch(e){ ok = null; }
+    }
+    if(ok === null){ // offline / no server: check on this device
+      const saved = LS.get('hsk_pw_'+name, null);
+      if(saved && saved !== h){ ok = false; err = '이 기기에 저장된 비밀번호와 다릅니다.'; } else { ok = true; LS.set('hsk_pw_'+name, h); }
+    }
+    if(!ok){ msg.textContent = err || '로그인 실패'; return; }
+    LS.set('hsk_pw_'+name, h);
+    S.user = {sid:name, name, h}; LS.set('hsk_user', S.user); S.view = 'home'; render(); syncWrong(); syncProgress();
   };
 }
 
@@ -249,38 +320,74 @@ function setStats(set){
   return c;
 }
 function viewHome(){
-  const sets = SETS.filter(s => s.level === S.level);
+  S.corner = S.corner || LS.get('hsk_corner', 'class');
+  const exam = S.corner === 'exam';
+  const sets = SETS.filter(s => s.level === S.level && (exam ? s.corner === 'exam' : s.corner !== 'exam'));
   const hist = LS.get(histKey(S.user.sid), []);
-  app.innerHTML = topbar(`${TEACHER?'<button class="btn sm" data-act="teacher">교사용 현황</button>':''}<button class="btn sm ghost" data-act="logout">${esc(S.user.name)} · 변경</button>`) + `
+  app.innerHTML = topbar(`${TEACHER?'<button class="btn sm" data-act="teacher">교사용 현황</button>':''}<button class="btn sm ghost" data-act="logout">${esc(S.user.name)} · 로그아웃</button>`) + `
   <div class="wrap">
     <h1>${esc(S.user.name)}님, 加油！</h1>
-    <p class="muted">급수를 고르고, 전체 또는 영역별로 풀어 보세요. 제출하면 바로 채점되고 틀린 문제는 ‘오답 다시 풀기’에 모입니다.</p>
+    <div class="corners" role="tablist">
+      <button role="tab" data-act="corner" data-v="class" aria-selected="${!exam}"><b>📘 수업용 요약본</b><span>선생님과 함께 · 세트당 약 40문항 · 해설 포함</span></button>
+      <button role="tab" data-act="corner" data-v="exam" aria-selected="${exam}"><b>📝 실전 모의고사</b><span>혼자 시험처럼 · 100문항 · 중간 저장 후 이어 풀기</span></button>
+    </div>
+    <p class="muted">${exam ? '실제 시험처럼 시간을 재며 풉니다. 중간에 나가도 자동 저장되어, 다음에 이름·비밀번호로 들어와 <b>이어서 풀기</b>를 누르면 됩니다. 제출하면 바로 채점되고 틀린 문제는 다시 풀 수 있어요.' : '수업 시간에 선생님과 함께 푸는 요약본입니다. 전체 또는 영역별로 풀고, 제출하면 바로 채점·해설을 볼 수 있어요.'}</p>
     <div class="levels" role="group" aria-label="급수 선택">${[4,5,6].map(l=>`<button data-act="level" data-v="${l}" aria-pressed="${S.level===l}">HSK ${l}급</button>`).join('')}</div>
-    <div class="sets">${sets.map(set => {
-      const st = setStats(set), wrong = LS.get(wrongKey(S.user.sid,set.id), []);
-      const last = hist.filter(h => h.set === set.id).slice(-1)[0];
-      return `<div class="card set">
-        <h2>${esc(set.title)}</h2>
-        <div class="meta">${Object.entries(st).map(([k,v])=>`${SEC_KO[k]} ${v}`).join(' · ')}</div>
-        <button class="btn pri" data-act="start" data-set="${set.id}" data-scope="all">전체 풀기</button>
-        <div class="row">${Object.keys(st).map(k=>`<button class="btn sm" data-act="start" data-set="${set.id}" data-scope="${k}">${SEC_KO[k]}만</button>`).join('')}</div>
-        <div class="row"><button class="btn sm ${wrong.length?'seal':''}" data-act="start" data-set="${set.id}" data-scope="retry" ${wrong.length?'':'disabled'}>오답 다시 풀기 (${wrong.length})</button></div>
-        ${last?`<div class="last muted">최근: ${last.mode==='retry'?'오답 ':''}${last.c}/${last.t} (${Math.round(last.c/Math.max(1,last.t)*100)}%) · ${new Date(last.at).toLocaleDateString('ko-KR')}</div>`:''}
-      </div>`;}).join('')}</div>
+    <div class="sets">${sets.map(set => exam ? examCard(set, hist) : classCard(set, hist)).join('')}</div>
     <p class="muted" style="margin-top:24px;font-size:13px">🎧 이어폰을 준비하세요. 🎙 말하기는 Chrome·Edge·Safari에서 음성 인식이 가장 잘 됩니다. ${CFG.SCRIPT_URL?'':'<br>⚠️ 아직 구글시트가 연결되지 않아 기록은 이 기기에만 저장됩니다.'}</p>
+  </div>`;
+}
+function classCard(set, hist){
+  const st = setStats(set), wrong = LS.get(wrongKey(S.user.sid,set.id), []);
+  const last = hist.filter(h => h.set === set.id).slice(-1)[0];
+  return `<div class="card set">
+    <h2>${esc(set.title)}</h2>
+    <div class="meta">${Object.entries(st).map(([k,v])=>`${SEC_KO[k]} ${v}`).join(' · ')}</div>
+    <button class="btn pri" data-act="start" data-set="${set.id}" data-scope="all">전체 풀기</button>
+    <div class="row">${Object.keys(st).map(k=>`<button class="btn sm" data-act="start" data-set="${set.id}" data-scope="${k}">${SEC_KO[k]}만</button>`).join('')}</div>
+    <div class="row"><button class="btn sm ${wrong.length?'seal':''}" data-act="start" data-set="${set.id}" data-scope="retry" ${wrong.length?'':'disabled'}>오답 다시 풀기 (${wrong.length})</button></div>
+    ${last?`<div class="last muted">최근: ${last.mode==='retry'?'오답 ':''}${last.c}/${last.t} (${Math.round(last.c/Math.max(1,last.t)*100)}%) · ${new Date(last.at).toLocaleDateString('ko-KR')}</div>`:''}
+  </div>`;
+}
+function examCard(set, hist){
+  const st = setStats(set), wrong = LS.get(wrongKey(S.user.sid,set.id), []);
+  const prog = LS.get(progKey(S.user.sid, set.id), null);
+  const done = hist.filter(h => h.set === set.id && h.mode === 'exam');
+  const best = done.length ? Math.max(...done.map(h => Math.round(h.c/Math.max(1,h.t)*100))) : null;
+  const total = Object.values(set.minutes||{}).reduce((a,b)=>a+b,0);
+  const left = prog ? Math.max(0, total*60 - (prog.elapsed||0)) : 0;
+  return `<div class="card set">
+    <h2>${esc(set.title)} ${prog?'<span class="chip warn">진행 중</span>':''}</h2>
+    <div class="meta">${Object.entries(st).map(([k,v])=>`${SEC_KO[k]} ${v}`).join(' · ')} · 약 ${total}분</div>
+    ${prog ? `<div class="bar" style="margin-bottom:6px"><i style="width:${prog.pct||0}%"></i></div><div class="muted" style="font-size:13px;margin-bottom:10px">객관식 ${prog.pct||0}% 완료 · 남은 시간 약 ${Math.ceil(left/60)}분 · ${new Date(prog.savedAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})} 저장</div>
+      <button class="btn pri" data-act="exam" data-set="${set.id}" data-v="resume">이어서 풀기</button> <button class="btn sm ghost" data-act="exam" data-set="${set.id}" data-v="new">처음부터</button>`
+      : `<button class="btn pri" data-act="exam" data-set="${set.id}" data-v="new">${done.length?'다시 응시하기':'시험 시작'}</button>`}
+    <div class="row"><button class="btn sm ${wrong.length?'seal':''}" data-act="start" data-set="${set.id}" data-scope="retry" ${wrong.length?'':'disabled'}>오답 다시 풀기 (${wrong.length})</button></div>
+    ${done.length?`<div class="last muted">응시 ${done.length}회 · 최고 ${best}% · 최근 ${done.slice(-1)[0].c}/${done.slice(-1)[0].t} (${new Date(done.slice(-1)[0].at).toLocaleDateString('ko-KR')})</div>`:''}
   </div>`;
 }
 
 // ── test ──
-function startTest(setId, scope){
+function startTest(setId, scope, resume){
   const set = getSet(setId);
+  if(scope === 'exam'){
+    const prog = resume ? LS.get(progKey(S.user.sid, setId), null) : null;
+    if(!resume) LS.set(progKey(S.user.sid, setId), null);
+    const entries = flatten(set);
+    const sub = prog?.sub || {};
+    for(const k in sub) if(sub[k].phase === 'read') sub[k].phase = 'write';
+    S = {...S, view:'test', mode:'exam', set, scope:'exam', entries, ids:new Set(entries.map(e=>e.item.id)), ans: prog?.ans || {}, sub,
+         submitted:false, t0: Date.now() - (prog?.elapsed||0)*1000, tab: prog?.tab || entries[0].sec.key, result:null, retryCount:0, limit: Object.values(set.minutes||{}).reduce((a,b)=>a+b,0)*60};
+    render(); if(prog) toast('저장된 곳부터 이어서 풉니다.'); else persist(true);
+    return;
+  }
   const draft = LS.get(draftKey(S.user.sid, setId), {});
   let filter = null;
   if(scope === 'retry') filter = new Set(LS.get(wrongKey(S.user.sid, setId), []));
   const entries = flatten(set).filter(e => scope === 'all' ? true : scope === 'retry' ? (e.obj && filter.has(e.item.id)) : e.sec.key === scope);
   const sub = draft.sub || {};
   for(const k in sub) if(sub[k].phase === 'read') sub[k].phase = 'write';
-  S = {...S, view:'test', set, scope, entries, ids:new Set(entries.map(e=>e.item.id)), ans:{}, sub, submitted:false, t0:Date.now(), tab:null, result:null, retryCount:0};
+  S = {...S, view:'test', mode:'practice', set, scope, entries, ids:new Set(entries.map(e=>e.item.id)), ans:{}, sub, submitted:false, t0:Date.now(), tab:null, result:null, retryCount:0};
   S.tab = entries[0]?.sec.key;
   render();
 }
@@ -290,8 +397,8 @@ function inScope(item){ return S.ids.has(item.id); }
 function viewTest(){
   const secs = S.set.sections.filter(sec => S.entries.some(e => e.sec === sec));
   const objTotal = S.entries.filter(e => e.obj).length;
-  const modeLabel = S.scope==='retry' ? '오답 다시 풀기' : S.scope==='all' ? '전체' : SEC_KO[S.scope];
-  app.innerHTML = topbar(`<span class="chip">${esc(modeLabel)}</span>${TEACHER?'<span class="chip warn">교사 모드</span>':''}<span class="mono muted" id="clock">00:00</span><button class="btn sm" data-act="home">나가기</button>`) + `
+  const modeLabel = S.mode==='exam' ? '실전 모의고사' : S.scope==='retry' ? '오답 다시 풀기' : S.scope==='all' ? '전체' : SEC_KO[S.scope];
+  app.innerHTML = topbar(`<span class="chip">${esc(modeLabel)}</span>${TEACHER?'<span class="chip warn">교사 모드</span>':''}<span class="mono muted" id="clock">00:00</span>${S.mode==='exam'&&!S.submitted?'<span class="muted" id="saved" style="font-size:12px"></span><button class="btn sm" data-act="saveexit">저장하고 나가기</button>':'<button class="btn sm" data-act="home">나가기</button>'}`) + `
   <div class="wrap">
     <h1>${esc(S.set.title)}</h1>
     ${S.result ? resultHTML() : ''}
@@ -304,7 +411,12 @@ function viewTest(){
       : `<button class="btn pri" data-act="submit">${objTotal?'제출하고 채점':'제출'}</button>`}
   </div></div>`;
   updateProgress();
-  if(!S.submitted){ const c = document.getElementById('clock'); tick = setInterval(()=>{ c.textContent = fmtTime((Date.now()-S.t0)/1000); }, 1000); }
+  if(!S.submitted){ const c = document.getElementById('clock'); let warned = false, n = 0;
+    tick = setInterval(()=>{ const el = (Date.now()-S.t0)/1000;
+      if(S.mode === 'exam'){ const left = S.limit - el; c.textContent = (left < 0 ? '+' : '남은 ') + fmtTime(Math.abs(left)); c.style.color = left < 300 ? 'var(--seal)' : '';
+        if(left <= 0 && !warned){ warned = true; toast('⏰ 시험 시간이 끝났어요. 마무리하고 제출하세요.', 6000); }
+        if(++n % 30 === 0) persist(); }
+      else c.textContent = fmtTime(el); }, 1000); }
   else document.getElementById('clock').textContent = fmtTime(S.result.dur);
   wireTest();
 }
@@ -380,7 +492,7 @@ function qBody(part, g, it){
   } else if(t === 'error'){
     h += `<div><span class="qn">${n}</span><span class="muted">틀린 문장을 고르세요</span></div><div class="opts col">${it.opts.map((o,i)=>optBtn(id,LETTERS[i],LETTERS[i],o)).join('')}</div>`;
   } else if(t === 'multi'){
-    h += `<div><span class="qn">${n}</span><span class="zh">${esc(it.text)}</span></div><div class="opts">${it.opts.map((o,i)=>optBtn(id,LETTERS[i],LETTERS[i],o)).join('')}</div>`;
+    h += `<div><span class="qn">${n}</span><span class="zh">${esc(it.text)}</span></div><div class="opts wide">${it.opts.map((o,i)=>optBtn(id,LETTERS[i],LETTERS[i],o)).join('')}</div>`;
   } else if(t === 'bank'){
     const a = S.ans[id];
     const sentence = esc(it.text).replace('（　　）', `<span class="blank">${a?esc(a+' '+part.bank[a]):'　'}</span>`);
@@ -408,8 +520,26 @@ function reviewHTML(e){
   if(!S.submitted) return `<details class="teacher-ans"><summary>정답 보기 (교사)</summary><div class="fbk"><span class="ans">정답: ${esc(correctText(e))}</span><br>${esc(it.exp||'')}${it.script?`<div class="script zh" style="margin-top:6px">${esc(it.script)}</div>`:''}</div></details>`;
   const ok = isCorrect(e, a);
   return `<div class="fbk"><span class="chip ${ok?'':'seal'}">${ok?'정답':'오답'}</span> <span class="ans">정답: <span class="zh" style="font-size:inherit">${esc(correctText(e))}</span></span>${!ok?` <span class="muted">· 내 답: ${esc(a ? (e.part.type==='order'?a.split('').join(' → '):a) : '(무응답)')}</span>`:''}
-    ${it.exp?`<div style="margin-top:4px">💡 ${esc(it.exp)}</div>`:''}
+    ${it.exp?`<div style="margin-top:4px">💡 ${esc(it.exp)}</div>`:explainHTML(e)}
     ${it.script?`<details><summary>녹음 스크립트</summary><div class="script zh">${esc(it.script)}</div></details>`:''}</div>`;
+}
+
+function explainHTML(e){
+  const cached = LS.get(`hsk_exp_${S.set.id}_${e.item.id}`, null);
+  if(cached) return `<div class="ai" style="margin-top:6px;white-space:pre-wrap">💡 ${esc(cached)}</div>`;
+  if(!CFG.SCRIPT_URL) return '';
+  return `<div id="exp-${e.item.id}"><button class="btn sm" data-act="explain" data-id="${e.item.id}" style="margin-top:6px">💡 AI 해설 보기</button></div>`;
+}
+async function explain(id){
+  const e = S.entries.find(x => x.item.id === id), it = e.item, box = document.getElementById('exp-'+id);
+  if(box) box.innerHTML = '<div class="muted" style="margin-top:6px">해설을 만드는 중…</div>';
+  const ctx = [e.group?.passage || e.group?.script || it.passage || it.script || '', e.group?.bank ? '보기: ' + Object.entries(e.group.bank).map(([k,v])=>k+' '+v).join(' / ') : '', e.part.bank ? '보기: ' + Object.entries(e.part.bank).map(([k,v])=>k+' '+v).join(' / ') : ''].filter(Boolean).join('\n');
+  const question = it.q || (it.stem ? '★ ' + it.stem + ' (√/× 판단)' : '') || it.text || (it.segs ? '순서 배열: ' + it.segs.map((x,i)=>LETTERS[i]+' '+x).join(' / ') : '') || (e.part.type==='error' ? '어법상 틀린 문장을 고르시오' : '') || (e.part.type==='cloze' ? `빈칸 ${itemNo(id)}에 알맞은 것` : '') || (e.part.type==='sentfill' ? `빈칸 ${itemNo(id)}에 알맞은 문장` : '') || (e.part.type==='arrange' ? '단어 배열: ' + it.words.join(' / ') : '');
+  try{
+    const r = await api({action:'explain', level:S.set.level, context:ctx, question, opts:it.opts||[], answer:correctText(e), mine:S.ans[id]||''});
+    if(r && r.ok && r.explanation){ LS.set(`hsk_exp_${S.set.id}_${id}`, r.explanation); if(box) box.outerHTML = `<div class="ai" style="margin-top:6px;white-space:pre-wrap">💡 ${esc(r.explanation)}</div>`; }
+    else if(box) box.innerHTML = `<div class="muted" style="margin-top:6px;font-size:13px">AI 해설을 쓸 수 없어요 (Apps Script에 GEMINI_API_KEY가 필요합니다).</div>`;
+  }catch(err){ if(box) box.innerHTML = '<div class="muted" style="margin-top:6px">네트워크 오류</div>'; }
 }
 
 // ── subjective (writing / speaking) ──
@@ -422,6 +552,7 @@ function subjHTML(part, it, n){
     h += textBox(it, 2);
   } else if(t === 'essay'){
     h += `<div><span class="qn">${n}</span>${it.words?`제시어: ${it.words.map(w=>`<span class="word-tag" style="font-size:var(--zh)">${esc(w)}</span>`).join(' ')}`:''}</div>`;
+    if(it.img) h += `<img src="${esc(it.img)}" alt="문제 그림" style="max-width:100%;border-radius:10px;border:1px solid var(--line);margin:8px 0">`;
     if(it.scene) h += `<div class="scene"><span class="emo">${it.emoji||''}</span><span>${esc(it.scene)}</span></div>`;
     h += `<div class="muted" style="font-size:13px">${it.min}~${it.max}자 권장 (HSK 기준 80자 내외)</div>` + textBox(it, 5);
   } else if(t === 'summary'){
@@ -447,10 +578,11 @@ function subjHTML(part, it, n){
   h += `<div class="fbwrap" id="fb-${it.id}">${st.fbHTML || ''}</div>`;
   return h;
 }
+function fbAllowed(){ return S.mode !== 'exam' || S.submitted; }
 function textBox(it, rows){
   const st = S.sub[it.id] || {};
   return `<textarea rows="${rows}" data-text="${it.id}" placeholder="여기에 중국어로 쓰세요" lang="zh-CN" ${S.submitted?'readonly':''}>${esc(st.text||'')}</textarea>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:6px"><button class="btn sm pri" data-act="feedback" data-id="${it.id}">즉시 피드백</button><span class="sp"></span><span class="counter" id="cnt-${it.id}">${countChars(st.text)}자</span></div>`;
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px">${fbAllowed()?`<button class="btn sm pri" data-act="feedback" data-id="${it.id}">${S.mode==='exam'?'AI 피드백 받기':'즉시 피드백'}</button>`:'<span class="muted" style="font-size:13px">피드백은 제출 후에 받을 수 있어요</span>'}<span class="sp"></span><span class="counter" id="cnt-${it.id}">${countChars(st.text)}자</span></div>`;
 }
 function recHTML(it){
   const st = S.sub[it.id] || {};
@@ -636,11 +768,12 @@ async function submit(){
   const wk = wrongKey(S.user.sid, S.set.id); const wrong = new Set(LS.get(wk, []));
   for(const r of rows) if(r.ok === true) wrong.delete(r.id); else if(r.ok === false) wrong.add(r.id);
   LS.set(wk, [...wrong]); S.retryCount = wrong.size;
-  const hist = LS.get(histKey(S.user.sid), []); hist.push({set:S.set.id, mode:S.scope==='retry'?'retry':'test', scope:S.scope, c, t:obj.length, at:Date.now()}); LS.set(histKey(S.user.sid), hist.slice(-100));
+  const hist = LS.get(histKey(S.user.sid), []); hist.push({set:S.set.id, mode:S.mode==='exam'?'exam':S.scope==='retry'?'retry':'test', scope:S.scope, c, t:obj.length, at:Date.now()}); LS.set(histKey(S.user.sid), hist.slice(-100));
+  if(S.mode === 'exam'){ LS.set(progKey(S.user.sid, S.set.id), null); if(CFG.SCRIPT_URL && S.user.h) api({action:'clearProgress', name:S.user.name, hash:S.user.h, setId:S.set.id}).catch(()=>{}); }
   render();
   if(CFG.SCRIPT_URL){
     try{
-      const r = await api({action:'submit', sid:S.user.sid, name:S.user.name, setId:S.set.id, level:S.set.level, mode:S.scope==='retry'?'retry':'test', scope:S.scope, score:c, total:obj.length, per, durationSec:Math.round(dur), answers:rows});
+      const r = await api({action:'submit', sid:S.user.sid, name:S.user.name, setId:S.set.id, level:S.set.level, mode:S.mode==='exam'?'exam':S.scope==='retry'?'retry':'test', scope:S.scope, score:c, total:obj.length, per, durationSec:Math.round(dur), answers:rows});
       toast(r && r.ok ? '✅ 결과가 구글시트에 기록되었어요.' : '⚠️ 시트 기록 실패 — 결과는 이 기기에 저장됐어요.');
     }catch(err){ toast('⚠️ 네트워크 오류 — 결과는 이 기기에 저장됐어요.'); }
   }
@@ -661,7 +794,7 @@ function viewTeacher(){
     <h1>교사용 현황</h1><p class="muted">구글시트에 쌓인 기록을 불러옵니다. Apps Script 속성에 TEACHER_PIN을 설정해 두세요.</p>
     ${CFG.SCRIPT_URL?'':'<p class="chip warn">config.js에 SCRIPT_URL을 먼저 넣어야 합니다.</p>'}
     <div class="card" style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
-      <div><label class="muted" style="font-size:13px">세트</label><select id="tset">${SETS.map(s=>`<option value="${s.id}">${esc(s.title)}</option>`).join('')}</select></div>
+      <div><label class="muted" style="font-size:13px">세트</label><select id="tset">${SETS.map(s=>`<option value="${s.id}">${s.corner==='exam'?'[실전] ':'[요약] '}${esc(s.title)}</option>`).join('')}</select></div>
       <div><label class="muted" style="font-size:13px">교사 PIN</label><input type="password" id="tpin" value="${esc(sessionStorage.getItem('hsk_pin')||'')}"></div>
       <button class="btn pri" data-act="tload">불러오기</button>
     </div><div id="tout"></div></div>`;
@@ -675,8 +808,9 @@ async function loadTeacher(){
     const s = getSet(set), f = flatten(s).filter(e => e.obj);
     const stats = f.map(e => ({e, st: r.items[e.item.id] || {n:0, wrong:0}})).filter(x => x.st.n).sort((a,b) => b.st.wrong/b.st.n - a.st.wrong/a.st.n);
     out.innerHTML = `<h2 style="margin-top:22px">학생별 최근 결과 (${r.students.length}명)</h2>
-      <table class="dash"><tr><th>학번</th><th>이름</th><th>모드</th><th>점수</th><th>듣기</th><th>독해</th><th>쓰기</th><th>오답 재도전</th><th>시간</th></tr>
+      <table class="dash"><tr><th>ID</th><th>이름</th><th>모드</th><th>점수</th><th>듣기</th><th>독해</th><th>쓰기</th><th>오답 재도전</th><th>시간</th></tr>
       ${r.students.map(x=>`<tr><td class="mono">${esc(x.sid)}</td><td>${esc(x.name)}</td><td>${esc(x.mode)}</td><td class="mono">${x.score}/${x.total}</td><td class="mono">${esc(x.L||'')}</td><td class="mono">${esc(x.R||'')}</td><td class="mono">${esc(x.W||'')}</td><td class="mono">${x.retry||0}회</td><td>${esc(x.time)}</td></tr>`).join('')}</table>
+      ${r.inprog && r.inprog.length ? `<h2 style="margin-top:22px">풀고 있는 학생 (${r.inprog.length}명)</h2><table class="dash"><tr><th>이름</th><th>객관식 진행률</th><th>마지막 저장</th></tr>${r.inprog.map(x=>`<tr><td>${esc(x.name)}</td><td class="mono">${esc(x.pct)}%</td><td>${esc(x.time)}</td></tr>`).join('')}</table>` : ''}
       <h2 style="margin-top:22px">많이 틀린 문항</h2>
       <table class="dash"><tr><th>문항</th><th>유형</th><th>응답</th><th>오답률</th><th>정답</th></tr>
       ${stats.map(({e,st})=>`<tr><td class="mono">${SEC_KO[e.sec.key]} ${itemNo(e.item.id)}</td><td>${esc(e.part.title)}</td><td class="mono">${st.n}</td><td><div class="bar" style="width:120px;display:inline-block;vertical-align:middle;background:var(--ok-soft)"><i style="width:${Math.round(st.wrong/st.n*100)}%;background:var(--seal)"></i></div> <span class="mono">${Math.round(st.wrong/st.n*100)}%</span></td><td class="zh" style="font-size:14px">${esc(correctText(e))}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">기록 없음</td></tr>'}</table>`;
@@ -689,9 +823,11 @@ document.addEventListener('input', ev => {
   const ta = ev.target.closest && ev.target.closest('textarea[data-text]'); if(!ta || !S.sub) return;
   const id = ta.dataset.text, st = S.sub[id] = S.sub[id] || {}; st.text = ta.value;
   const c = document.getElementById('cnt-'+id); if(c) c.textContent = countChars(ta.value) + '자';
-  saveDraft(); updateProgress();
+  saveDraft(); updateProgress(); persist();
 });
 // only one audio at a time
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden') persist(true); });
+window.addEventListener('pagehide', () => persist(true));
 document.addEventListener('play', ev => { if(ev.target.tagName === 'AUDIO') document.querySelectorAll('audio').forEach(b => { if(b !== ev.target) b.pause(); }); }, true);
 function startSummary(id){
   const e = S.entries.find(x=>x.item.id===id), st = S.sub[id] = S.sub[id] || {};
@@ -706,19 +842,23 @@ document.addEventListener('click', ev => {
   const b = ev.target.closest('[data-act]'); if(!b || b.disabled) return;
   const act = b.dataset.act, id = b.dataset.id, v = b.dataset.v;
   if(act === 'font'){ const order=['m','l','xl']; const cur=document.body.dataset.size||'m'; document.body.dataset.size = order[(order.indexOf(cur)+1)%3]; LS.set('hsk_font', document.body.dataset.size); }
-  else if(act === 'logout'){ S.user = null; LS.set('hsk_user', null); S.view='login'; render(); }
+  else if(act === 'logout'){ if(S.view==='test') persist(true); S.user = null; LS.set('hsk_user', null); S.view='login'; render(); }
   else if(act === 'level'){ S.level = +v; LS.set('hsk_level', S.level); render(); }
   else if(act === 'start'){ startTest(b.dataset.set, b.dataset.scope); }
-  else if(act === 'home'){ if(S.view==='test' && !S.submitted && !confirm('나가면 객관식 답은 저장되지 않아요. 나갈까요?')) return; S.view='home'; render(); syncWrong(); }
+  else if(act === 'home'){ if(S.view==='test' && !S.submitted && S.mode!=='exam' && !confirm('나가면 객관식 답은 저장되지 않아요. 나갈까요?')) return; S.view='home'; render(); syncWrong(); }
   else if(act === 'teacher'){ S.view='teacher'; render(); }
   else if(act === 'tload'){ loadTeacher(); }
-  else if(act === 'tab'){ S.tab = v; app.querySelectorAll('section[data-sec]').forEach(s => s.hidden = s.dataset.sec !== v); app.querySelectorAll('[data-act=tab]').forEach(t => t.setAttribute('aria-selected', t.dataset.v===v)); window.scrollTo(0,0); }
+  else if(act === 'tab'){ S.tab = v; persist(); app.querySelectorAll('section[data-sec]').forEach(s => s.hidden = s.dataset.sec !== v); app.querySelectorAll('[data-act=tab]').forEach(t => t.setAttribute('aria-selected', t.dataset.v===v)); window.scrollTo(0,0); }
   else if(S.submitted && ['pick','seq','word','reset','wreset','sumstart'].includes(act)){ return; }
-  else if(act === 'pick'){ S.ans[id] = v; rerenderItem(id); }
-  else if(act === 'seq'){ S.ans[id] = (S.ans[id]||'') + v; rerenderItem(id); }
-  else if(act === 'reset'){ S.ans[id] = ''; rerenderItem(id); }
-  else if(act === 'word'){ const arr = S.ans['_w_'+id] = S.ans['_w_'+id] || []; arr.push(+v); const it = S.entries.find(x=>x.item.id===id).item; S.ans[id] = arr.map(i=>it.words[i]).join(''); rerenderItem(id); }
-  else if(act === 'wreset'){ S.ans['_w_'+id] = []; S.ans[id] = ''; rerenderItem(id); }
+  else if(act === 'pick'){ S.ans[id] = v; rerenderItem(id); persist(); }
+  else if(act === 'seq'){ S.ans[id] = (S.ans[id]||'') + v; rerenderItem(id); persist(); }
+  else if(act === 'reset'){ S.ans[id] = ''; rerenderItem(id); persist(); }
+  else if(act === 'word'){ const arr = S.ans['_w_'+id] = S.ans['_w_'+id] || []; arr.push(+v); const it = S.entries.find(x=>x.item.id===id).item; S.ans[id] = arr.map(i=>it.words[i]).join(''); rerenderItem(id); persist(); }
+  else if(act === 'wreset'){ S.ans['_w_'+id] = []; S.ans[id] = ''; rerenderItem(id); persist(); }
+  else if(act === 'saveexit'){ persist(true); toast('저장했어요. 다음에 ‘이어서 풀기’로 계속하세요.'); S.view='home'; render(); }
+  else if(act === 'exam'){ startTest(b.dataset.set, 'exam', v === 'resume'); }
+  else if(act === 'corner'){ S.corner = v; LS.set('hsk_corner', v); render(); }
+  else if(act === 'explain'){ explain(id); }
   else if(act === 'submit'){ submit(); }
   else if(act === 'retrynow'){ startTest(S.set.id, 'retry'); }
   else if(act === 'rec'){ toggleRec(id); }
@@ -727,7 +867,8 @@ document.addEventListener('click', ev => {
   else if(act === 'sumwrite'){ const st=S.sub[id]; if(st){ st.phase='write'; rerenderItem(id); } }
 });
 document.body.dataset.size = LS.get('hsk_font', 'm');
-if(S.user){ S.view = 'home'; syncWrong(); }
+if(S.user && !S.user.h) S.user = null;   // older sessions: ask for name + password once
+if(S.user){ S.view = 'home'; syncWrong(); syncProgress(); }
 render();
 </script>
 </body>
