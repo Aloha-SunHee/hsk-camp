@@ -3,7 +3,6 @@ HSK_SETS.push({
 "id": "p4a",
 "level": 4,
 "label": "1회",
-"source": "GPT",
 "title": "HSK 4급 실전 모의고사 1회",
 "minutes": {
 "L": 30,

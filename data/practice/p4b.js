@@ -3,7 +3,6 @@ HSK_SETS.push({
 "id": "p4b",
 "level": 4,
 "label": "2회",
-"source": "Gemini",
 "title": "HSK 4급 실전 모의고사 2회",
 "minutes": {
 "L": 30,

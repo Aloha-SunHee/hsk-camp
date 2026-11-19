@@ -3,7 +3,6 @@ HSK_SETS.push({
 "id": "p6b",
 "level": 6,
 "label": "2회",
-"source": "Gemini",
 "title": "HSK 6급 실전 모의고사 2회",
 "minutes": {
 "L": 35,
