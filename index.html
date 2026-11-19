@@ -176,6 +176,8 @@ const SETS = window.HSK_SETS || [];
 const app = document.getElementById('app');
 const qs = new URLSearchParams(location.search);
 const TEACHER = qs.has('teacher');
+// 정답·해설·스크립트 미리 보기는 교사 PIN이 서버에서 확인된 뒤에만 켜집니다 (?teacher=1만으로는 안 보임).
+const tOK = () => TEACHER && sessionStorage.getItem('hsk_pin_ok') === '1';
 const OBJ = new Set(['tf','lmc','lgroup','bank','order','rmc','rgroup','cloze','error','multi','sentfill','arrange']);
 const LETTERS = ['A','B','C','D','E','F'];
 const SEC_KO = {L:'듣기',R:'독해',W:'쓰기',S:'말하기'};
@@ -381,6 +383,8 @@ function viewHome(){
   app.innerHTML = topbar(`${TEACHER?'<button class="btn sm" data-act="teacher">교수자 메뉴</button>':''}<button class="btn sm" data-act="notebook">📒 오답노트</button><button class="btn sm ghost" data-act="logout">${esc(S.user.name)} · 로그아웃</button>`) + `
   <div class="wrap">
     <h1>${esc(S.user.name)}님, 加油！</h1>
+    ${TEACHER && !tOK() ? `<div class="card now" style="margin:12px 0"><b>🔒 교사 PIN을 입력하면 문제 화면에서 정답·해설·스크립트를 미리 볼 수 있어요.</b>
+      <div class="row" style="margin-top:8px;align-items:center"><input type="password" id="gpin" placeholder="교사 PIN" style="width:160px"><button class="btn pri" data-act="pinok">확인</button></div></div>` : ''}
     ${nowBanner()}
     ${lv.length > 1 ? `<div class="levels" role="group" aria-label="급수 선택">${lv.map(l=>`<button data-act="level" data-v="${l}" aria-pressed="${S.level===l}">HSK ${l}급</button>`).join('')}</div>` : ''}
     ${levelChoiceHTML()}
@@ -457,7 +461,7 @@ function viewTest(){
   const secs = S.set.sections.filter(sec => S.entries.some(e => e.sec === sec));
   const objTotal = S.entries.filter(e => e.obj).length;
   const modeLabel = S.mode==='exam' ? '실전 모의고사' : S.scope==='retry' ? '오답 다시 풀기' : S.scope==='all' ? '전체' : SEC_KO[S.scope];
-  app.innerHTML = topbar(`<span class="chip">${esc(modeLabel)}</span>${TEACHER?'<span class="chip warn">교사 모드</span>':''}<span class="mono muted" id="clock">00:00</span>${S.mode==='exam'&&!S.submitted?'<span class="muted" id="saved" style="font-size:12px"></span><button class="btn sm" data-act="saveexit">저장하고 나가기</button>':'<button class="btn sm" data-act="home">나가기</button>'}`) + `
+  app.innerHTML = topbar(`<span class="chip">${esc(modeLabel)}</span>${tOK()?'<span class="chip warn">교사 모드</span>':''}<span class="mono muted" id="clock">00:00</span>${S.mode==='exam'&&!S.submitted?'<span class="muted" id="saved" style="font-size:12px"></span><button class="btn sm" data-act="saveexit">저장하고 나가기</button>':'<button class="btn sm" data-act="home">나가기</button>'}`) + `
   <div class="wrap">
     <h1>${esc(S.set.title)}</h1>
     ${S.result ? resultHTML() : ''}
@@ -508,7 +512,7 @@ function groupHTML(part, g){
   let head = '';
   if(part.type === 'lgroup'){
     head = audioTag(S.set.id, g.id);
-    if(S.submitted || TEACHER) head += `<details><summary>녹음 스크립트</summary><div class="script zh">${esc(g.script)}</div></details>`;
+    if(S.submitted || tOK()) head += `<details><summary>녹음 스크립트</summary><div class="script zh">${esc(g.script)}</div></details>`;
   } else if(part.type === 'sentfill'){
     head = `<div class="passage zh">${markPassage(g.passage, g)}</div><div class="bank zh">${Object.entries(g.bank).map(([k,v])=>`<span><b>${k}</b>${esc(v)}</span>`).join('')}</div>`;
   } else {
@@ -539,7 +543,7 @@ function qBody(part, g, it){
   if(t === 'tf'){
     h += `<div><span class="qn">${n}</span><span class="zh">★ ${esc(it.stem)}</span></div><div class="tfopts">${optBtn(id,'√','√')}${optBtn(id,'×','×')}</div>`;
   } else if(t === 'lmc' || t === 'lgroup'){
-    const showQ = (S.submitted || TEACHER) && it.q;
+    const showQ = (S.submitted || tOK()) && it.q;
     h += `<div><span class="qn">${n}</span>${showQ?qText(it.q):(it.q?'<span class="muted" style="font-size:13px">질문은 녹음으로 들려줍니다</span>':'')}</div>`;
     h += `<div class="opts">${it.opts.map((o,i)=>optBtn(id,LETTERS[i],LETTERS[i],o)).join('')}</div>`;
   } else if(t === 'rmc' || t === 'rgroup'){
@@ -571,7 +575,7 @@ function qBody(part, g, it){
   } else {
     h += subjHTML(part, it, n);
   }
-  if(entry?.obj && (S.submitted || TEACHER)) h += reviewHTML(entry);
+  if(entry?.obj && (S.submitted || tOK())) h += reviewHTML(entry);
   return h;
 }
 function reviewHTML(e){
@@ -624,14 +628,14 @@ function subjHTML(part, it, n){
   } else if(t === 'repeat' || t === 'read'){
     h += `<div><span class="qn">S${n}</span>${t==='repeat'?'<span class="muted">듣고 따라 말하기 — 문장은 녹음 후 공개됩니다</span>':'<span class="muted">소리 내어 읽기</span>'}</div>`;
     if(t === 'repeat') h += audioTag(S.set.id, it.id);
-    if(t === 'read' || st.transcript != null || S.submitted || TEACHER) h += `<div class="passage zh">${esc(it.text)}</div>`;
+    if(t === 'read' || st.transcript != null || S.submitted || tOK()) h += `<div class="passage zh">${esc(it.text)}</div>`;
     if(t === 'read') h += `<details><summary>모범 낭독 듣기</summary>${audioTag(S.set.id, it.id)}</details>`;
     h += recHTML(it);
   } else if(t === 'speak' || t === 'retell'){
     h += `<div><span class="qn">S${n}</span>${it.prompt?`<span class="zh">${esc(it.prompt)}</span>`:'<span class="muted">이야기를 듣고 다시 말하기</span>'}</div>`;
     if(it.emoji) h += `<div class="scene"><span class="emo">${it.emoji}</span><span>${esc(it.ko)}</span></div>`;
     else h += `<div class="muted" style="font-size:13px">${esc(it.ko||'')}</div>`;
-    if(t === 'retell'){ h += audioTag(S.set.id, it.id); if(S.submitted||TEACHER) h += `<details><summary>원문 스크립트</summary><div class="script zh">${esc(it.script)}</div></details>`; }
+    if(t === 'retell'){ h += audioTag(S.set.id, it.id); if(S.submitted||tOK()) h += `<details><summary>원문 스크립트</summary><div class="script zh">${esc(it.script)}</div></details>`; }
     h += recHTML(it);
   }
   h += `<div class="fbwrap" id="fb-${it.id}">${st.fbHTML || ''}</div>`;
@@ -871,7 +875,8 @@ async function loadTeacher(){
   const out = document.getElementById('tout'); out.innerHTML = '<p class="muted">불러오는 중…</p>';
   try{
     const r = await apiGet({action:'summary', pin, set});
-    if(!r || !r.ok){ out.innerHTML = `<p class="chip seal">${esc(r?.error || '불러오기 실패')}</p>`; return; }
+    if(!r || !r.ok){ sessionStorage.removeItem('hsk_pin_ok'); out.innerHTML = `<p class="chip seal">${esc(r?.error || '불러오기 실패')}</p>`; return; }
+    sessionStorage.setItem('hsk_pin_ok','1');
     const s = getSet(set), f = flatten(s).filter(e => e.obj);
     const stats = f.map(e => ({e, st: r.items[e.item.id] || {n:0, wrong:0}})).filter(x => x.st.n).sort((a,b) => b.st.wrong/b.st.n - a.st.wrong/a.st.n);
     out.innerHTML = `<h2 style="margin-top:22px">학생별 최근 결과 (${r.students.length}명)</h2>
@@ -1058,7 +1063,8 @@ async function loadReview(){
   const levelSets = SETS.filter(s => s.level===S.rv.level);
   const sets = S.rv.sets || levelSets.filter(s=>s.corner==='exam').map(s=>s.id);
   try{ const r = await apiGet({action:'review', pin, sets:sets.join(',')});
-    if(!r || !r.ok){ toast(r?.error || '불러오기 실패'); return; }
+    if(!r || !r.ok){ sessionStorage.removeItem('hsk_pin_ok'); toast(r?.error || '불러오기 실패'); return; }
+    sessionStorage.setItem('hsk_pin_ok','1');
     S.rv.items = r.items; S.rv.students = r.students; S.rv.sel = new Set();
     r.items.filter(x => x.n && x.wrong/x.n >= 0.4).sort((a,b)=>b.wrong/b.n-a.wrong/a.n).slice(0,20).forEach(x => S.rv.sel.add(x.set+'|'+x.id));
     render();
@@ -1166,6 +1172,12 @@ document.addEventListener('click', ev => {
   if(act === 'font'){ const order=['m','l','xl']; const cur=document.body.dataset.size||'m'; document.body.dataset.size = order[(order.indexOf(cur)+1)%3]; LS.set('hsk_font', document.body.dataset.size); }
   else if(act === 'logout'){ if(S.view==='test') persist(true); S.user = null; LS.set('hsk_user', null); S.view='login'; render(); }
   else if(act === 'level'){ S.level = +v; LS.set('hsk_level', S.level); render(); }
+  else if(act === 'pinok'){
+    const pin = document.getElementById('gpin').value.trim();
+    apiGet({action:'review', pin, sets:''}).then(r => {
+      if(r && r.ok){ sessionStorage.setItem('hsk_pin_ok','1'); sessionStorage.setItem('hsk_pin', pin); toast('✅ 교사 모드가 켜졌어요.'); render(); }
+      else toast(r?.error || 'PIN이 맞지 않습니다.'); }).catch(() => toast('네트워크 오류'));
+  }
   else if(act === 'golevel'){ LS.set(`hsk_go_${S.user.sid}_${v}`, true); S.level = +v; LS.set('hsk_level', S.level); render(); }
   else if(act === 'stay'){ LS.set(`hsk_stay_${S.user.sid}_${v}`, true); render(); toast(`${v}급 복습을 계속합니다. 준비되면 '${+v+1}급 도전하기'를 누르세요.`); }
   else if(act === 'start'){ startTest(b.dataset.set, b.dataset.scope); }
