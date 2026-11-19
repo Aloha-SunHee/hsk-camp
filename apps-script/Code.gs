@@ -7,7 +7,7 @@
  *  3. 프로젝트 설정(톱니바퀴) → 스크립트 속성 추가
  *       TEACHER_PIN    : 교사용 현황 화면 비밀번호 (예: 2580)
  *       GEMINI_API_KEY : (선택) https://aistudio.google.com/apikey 에서 발급한 키 → 쓰기·말하기 AI 피드백
- *       GEMINI_MODEL   : (선택) 기본값 gemini-2.5-flash
+ *       GEMINI_MODEL   : (선택) 먼저 쓸 모델. 비우면 gemini-3.5-flash-lite → 3.6-flash → flash-latest 순서로 자동 시도
  *  4. 배포 → 새 배포 → 유형: 웹 앱 / 실행: 나 / 액세스: 모든 사용자 → 배포
  *  5. 웹 앱 URL 을 웹앱의 config.js 의 SCRIPT_URL 에 붙여 넣기
  *  ※ 코드를 고친 뒤에는 ‘배포 관리 → 수정 → 새 버전’으로 다시 배포해야 반영됩니다.
@@ -261,14 +261,35 @@ function explain_(p) {
     p.mine ? '학생이 고른 답: ' + p.mine : '',
     '형식: ① 정답 근거가 되는 원문 표현(중국어 인용 1~2곳) ② 왜 정답인지 1~2문장 ③ 학생 답이 틀렸다면 왜 틀렸는지 1문장 ④ 핵심 어휘 2~3개(중국어-병음-뜻). 전체 6줄 이내, 마크다운 기호 없이 일반 텍스트.'
   ].filter(Boolean).join('\n\n');
-  const model = prop_('GEMINI_MODEL', 'gemini-2.5-flash');
-  const res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key), {
-    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    payload: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2 } })
-  });
-  if (res.getResponseCode() !== 200) return { ok: false, error: 'Gemini ' + res.getResponseCode() };
-  const j = JSON.parse(res.getContentText());
-  return { ok: true, explanation: j.candidates[0].content.parts.map(x => x.text || '').join('').trim() };
+  try {
+    const j = callGemini_({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2 } });
+    return { ok: true, explanation: j.candidates[0].content.parts.map(x => x.text || '').join('').trim() };
+  } catch (e) { return { ok: false, error: String(e.message || e).slice(0, 200) }; }
+}
+
+// Gemini 호출: 요청이 몰려 바쁘면(503/429) 잠깐 쉬고 다시 시도하고, 그래도 안 되면 다른 모델로 넘어갑니다.
+// GEMINI_MODEL 속성이 있으면 그 모델을 먼저 씁니다.
+const GEMINI_FALLBACKS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest'];
+function callGemini_(body) {
+  const key = prop_('GEMINI_API_KEY', '');
+  if (!key) throw new Error('GEMINI_API_KEY 없음');
+  const models = [prop_('GEMINI_MODEL', '')].concat(GEMINI_FALLBACKS).filter((m, i, a) => m && a.indexOf(m) === i);
+  let last = '';
+  for (const m of models) {
+    for (let t = 0; t < 2; t++) {
+      const res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent', {
+        method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+        headers: { 'x-goog-api-key': key }, payload: JSON.stringify(body)
+      });
+      const code = res.getResponseCode();
+      if (code === 200) return JSON.parse(res.getContentText());
+      last = 'Gemini ' + code + ' (' + m + '): ' + res.getContentText().slice(0, 200);
+      if (code === 503 || code === 429 || code === 500) { Utilities.sleep(1200 * (t + 1)); continue; }
+      if (code === 404) break;            // 모델이 없으면 다음 모델로
+      throw new Error(last);              // 키 오류 등은 바로 알림
+    }
+  }
+  throw new Error(last);
 }
 
 const KIND_DESC = {
@@ -282,7 +303,6 @@ const KIND_DESC = {
 function gemini_(p) {
   const key = prop_('GEMINI_API_KEY', '');
   if (!key) return null;
-  const model = prop_('GEMINI_MODEL', 'gemini-2.5-flash');
   const spoken = p.kind === 'speak' || p.kind === 'retell';
   const lines = [
     '너는 한국 대학생(사이버한국외대 중국어 전공)에게 HSK ' + p.level + '급을 가르치는 친절하고 정확한 중국어 교사다.',
@@ -301,12 +321,7 @@ function gemini_(p) {
     '{"score": 0~100 정수, "level": "HSK ' + p.level + '급 기준 한 줄 평가", "summary": "총평 2문장", "strengths": ["잘한 점"], "corrections": [{"wrong": "학생 원문 일부", "right": "수정한 중국어", "reason": "한국어 설명"}], "improved": "학생 답안의 내용을 살려 자연스럽게 다듬은 중국어 전체", "tips": ["다음에 연습할 점 1~2개"]}',
     'corrections는 실제 오류만 최대 5개. 오류가 없으면 빈 배열.'
   ].filter(Boolean).join('\n\n');
-  const res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key), {
-    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    payload: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: lines }] }], generationConfig: { temperature: 0.3, responseMimeType: 'application/json' } })
-  });
-  if (res.getResponseCode() !== 200) throw new Error('Gemini ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 300));
-  const j = JSON.parse(res.getContentText());
+  const j = callGemini_({ contents: [{ role: 'user', parts: [{ text: lines }] }], generationConfig: { temperature: 0.3, responseMimeType: 'application/json' } });
   const txt = j.candidates[0].content.parts.map(x => x.text || '').join('');
   const fb = JSON.parse(txt.replace(/^```json\s*|```$/g, ''));
   fb.score = Math.max(0, Math.min(100, parseInt(fb.score, 10) || 0));
