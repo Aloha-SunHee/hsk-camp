@@ -341,7 +341,39 @@ function setStats(set){
   for(const e of f) c[e.sec.key] = (c[e.sec.key]||0) + 1;
   return c;
 }
+// 급수 잠금: 4급부터. 한 급수의 실전 모의고사(1·2회)를 모두 제출해야 다음 급수가 열립니다. 교수자 모드는 모두 열림.
+function levelDone(l){
+  const hist = LS.get(histKey(S.user.sid), []), hw = SETS.filter(s => s.level === l && s.corner === 'exam');
+  return hw.length > 0 && hw.every(s => hist.some(h => h.set === s.id && h.mode === 'exam'));
+}
+function unlockedLevels(){
+  if(TEACHER) return [4,5,6];
+  const out = [4];
+  for(const l of [4,5]){ if(levelDone(l) && entered(l + 1)) out.push(l + 1); else break; }
+  return out;
+}
+// 다음 급수에 들어간 적이 있는지 (도전을 눌렀거나 이미 그 급수 기록이 있음)
+function entered(l){
+  if(LS.get(`hsk_go_${S.user.sid}_${l}`, false)) return true;
+  const hist = LS.get(histKey(S.user.sid), []);
+  return hist.some(h => getSet(h.set)?.level === l);
+}
+function levelChoiceHTML(){
+  const L = S.level;
+  if(TEACHER || !levelDone(L) || (L < 6 && entered(L + 1))) return '';
+  if(L >= 6) return `<div class="card now" style="margin:12px 0"><b>🎉 HSK 6급 실전 모의고사까지 모두 마쳤어요!</b><div class="muted" style="margin-top:4px">틀린 문제를 다시 풀며 마무리 복습을 해 보세요.</div></div>`;
+  if(LS.get(`hsk_stay_${S.user.sid}_${L}`, false))
+    return `<div style="margin:10px 0"><button class="btn sm" data-act="golevel" data-v="${L+1}">🚀 HSK ${L+1}급 도전하기</button></div>`;
+  return `<div class="card now" style="margin:12px 0">
+    <b>🎉 HSK ${L}급 실전 모의고사를 모두 마쳤어요! 다음엔 무엇을 할까요?</b>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" data-act="stay" data-v="${L}">🔁 ${L}급 계속 복습</button>
+      <button class="btn pri" data-act="golevel" data-v="${L+1}">🚀 ${L+1}급 도전</button>
+    </div></div>`;
+}
 function viewHome(){
+  const lv = unlockedLevels();
+  if(!lv.includes(S.level)) S.level = lv[lv.length - 1];
   S.corner = S.corner || LS.get('hsk_corner', 'class');
   const exam = S.corner === 'exam';
   const sets = SETS.filter(s => s.level === S.level && (exam ? s.corner === 'exam' : s.corner !== 'exam'));
@@ -350,7 +382,8 @@ function viewHome(){
   <div class="wrap">
     <h1>${esc(S.user.name)}님, 加油！</h1>
     ${nowBanner()}
-    <div class="levels" role="group" aria-label="급수 선택">${[4,5,6].map(l=>`<button data-act="level" data-v="${l}" aria-pressed="${S.level===l}">HSK ${l}급</button>`).join('')}</div>
+    ${lv.length > 1 ? `<div class="levels" role="group" aria-label="급수 선택">${lv.map(l=>`<button data-act="level" data-v="${l}" aria-pressed="${S.level===l}">HSK ${l}급</button>`).join('')}</div>` : ''}
+    ${levelChoiceHTML()}
     <h2 style="margin:14px 0 8px">HSK ${S.level}급 학습 순서</h2>
     ${roadmapHTML(S.level)}
     <h2 style="margin:26px 0 0">전체 문제 보기</h2>
@@ -1133,6 +1166,8 @@ document.addEventListener('click', ev => {
   if(act === 'font'){ const order=['m','l','xl']; const cur=document.body.dataset.size||'m'; document.body.dataset.size = order[(order.indexOf(cur)+1)%3]; LS.set('hsk_font', document.body.dataset.size); }
   else if(act === 'logout'){ if(S.view==='test') persist(true); S.user = null; LS.set('hsk_user', null); S.view='login'; render(); }
   else if(act === 'level'){ S.level = +v; LS.set('hsk_level', S.level); render(); }
+  else if(act === 'golevel'){ LS.set(`hsk_go_${S.user.sid}_${v}`, true); S.level = +v; LS.set('hsk_level', S.level); render(); }
+  else if(act === 'stay'){ LS.set(`hsk_stay_${S.user.sid}_${v}`, true); render(); toast(`${v}급 복습을 계속합니다. 준비되면 '${+v+1}급 도전하기'를 누르세요.`); }
   else if(act === 'start'){ startTest(b.dataset.set, b.dataset.scope); }
   else if(act === 'home'){ if(S.view==='test' && !S.submitted && S.mode!=='exam' && !confirm('나가면 객관식 답은 저장되지 않아요. 나갈까요?')) return; S.view='home'; render(); syncWrong(); }
   else if(act === 'teacher'){ S.view='teacher'; render(); }
